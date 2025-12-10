@@ -1,8 +1,8 @@
 fastapi
 uvicorn
 python-dotenv
-weaviate-client
-sentence-transformers
+weaviate-client>=4.10.0
+sentence-transformers>=2.2.0
 transformers
 pydantic
 unidecode

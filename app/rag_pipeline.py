@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Dict, Any
 
 from .dosage_rules import compute_dosage
-from .weaviate_client import get_weaviate_client, search_treatment_chunks
+from .weaviate_client import weaviate_client, search_treatment_chunks
 from .prompts import build_treatment_prompt
 
 
@@ -33,7 +33,7 @@ def infer_season_from_date(date_iso: str) -> str:
 def fake_llm_call(prompt: str) -> str:
     """
     Pour l'instant, on simule l'appel au LLM.
-    On remplacera cette fonction par un vrai appel à l'API HF plus tard.
+    On remplacera cette fonction par un vrai appel à l'API plus tard.
     """
     return (
         "Diagnostic rapide : le contexte fourni indique une maladie foliaire probable.\n\n"
@@ -45,31 +45,30 @@ def fake_llm_call(prompt: str) -> str:
 
 def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Fonction principale du pipeline RAG.
-
-    Entrée (payload) : dict contenant au minimum :
-    - cnn_label : str
-    - mode : "bio" ou "conventionnel"
-    - severity : "faible" | "moderee" | "forte"
-    - area_m2 : float
-    - date_iso : str (optionnel)
-
-    Sortie : dict prêt à être renvoyé par l'API FastAPI.
+    Pipeline principal :
+    1) Déduit la saison à partir de la date.
+    2) Va chercher les chunks de connaissance pertinents dans Weaviate.
+    3) Construit un prompt RAG et (bientôt) appelle un LLM.
+    4) Calcule les dosages via compute_dosage.
+    5) Retourne une réponse structurée pour l’API.
     """
 
     cnn_label = payload["cnn_label"]
     mode = payload["mode"]
     severity = payload["severity"]
     area_m2 = float(payload["area_m2"])
-    date_iso = payload.get("date_iso") or ""
+    date_iso = payload.get("date_iso", "")
 
+    # 1. Saison
     season = infer_season_from_date(date_iso)
 
-    # 1. Récupération des chunks dans Weaviate (pour l'instant renvoie une liste vide).
-    client = get_weaviate_client()
-    chunks = search_treatment_chunks(client, cnn_label, mode, severity)
+    # 2. Récupération des chunks dans Weaviate.
+    #    On utilise le context manager pour que la connexion soit
+    #    proprement fermée (pas de warning "connection not closed").
+    with weaviate_client() as client:
+        chunks = search_treatment_chunks(client, cnn_label, mode, severity)
 
-    # 2. Si aucun chunk, on renvoie un message de prudence + dosage éventuel.
+    # 3. Si aucun chunk, on renvoie un plan basé uniquement sur les règles de dosage.
     if not chunks:
         dosage = compute_dosage(cnn_label, mode, area_m2)
         return {
@@ -91,22 +90,26 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
             ],
         }
 
-    # 3. Si on a des chunks, on construit un prompt et on appelle (fictivement) le LLM.
+    # 4. Construction du prompt à partir des chunks RAG.
+    disease_name_fr = chunks[0].get("nom_fr", cnn_label)
+
     prompt = build_treatment_prompt(
         cnn_label=cnn_label,
-        disease_name_fr=cnn_label,  # on utilisera un vrai nom FR plus tard
+        disease_name_fr=disease_name_fr,
         mode=mode,
         severity=severity,
         area_m2=area_m2,
         season=season,
-        context_chunks=chunks,
+        context_chunks=[{"text": c["text"]} for c in chunks],
     )
 
+    # 5. (Pour l’instant) on appelle un faux LLM.
     advice_text = fake_llm_call(prompt)
 
-    # 4. Calcul des dosages.
+    # 6. Calcul des dosages avec les règles métiers.
     dosage = compute_dosage(cnn_label, mode, area_m2)
 
+    # 7. Réponse structurée pour l’API.
     return {
         "cnn_label": cnn_label,
         "mode": mode,

@@ -31,3 +31,27 @@ vitiscan-rag-llm/
 ├─ env_vitiscan_rag.yml    # définition de l'environnement conda
 ├─ requirements.txt
 └─ README.md
+
+## VitiScan – API Solutions & RAG (traitements)
+
+Cette API fournit un plan de traitement structuré à partir :
+- d’une prédiction de maladie issue du modèle CNN,
+- du contexte saisi par l’utilisateur (mode de conduite, gravité, surface, date, lieu),
+- d’une base de connaissances (fiches maladies) indexée dans Weaviate via un pipeline RAG.
+
+### 1. Endpoint principal
+
+**Route**  
+`POST /solutions`
+
+**Request body (JSON)**
+
+```json
+{
+  "cnn_label": "Grape_Downy_mildew_leaf",
+  "mode": "conventionnel",
+  "severity": "moderee",
+  "area_sqm": 500,
+  "date_iso": "2025-05-15",
+  "location": "Occitanie, France"
+}
