@@ -1,5 +1,4 @@
-from typing import List, Dict
-
+from typing import List, Dict, Any
 
 def build_treatment_prompt(
     cnn_label: str,
@@ -11,39 +10,65 @@ def build_treatment_prompt(
     context_chunks: List[Dict[str, str]],
 ) -> str:
     """
-    Construit le prompt envoyé au LLM à partir des chunks de contexte.
-    context_chunks est une liste de dicts avec au minimum la clé 'text'.
+    Construit le prompt envoyé au LLM pour générer un plan d'action viticole.
+
+    On attend une réponse STRICTEMENT au format JSON valide, avec 4 champs :
+    - diagnostic: str
+    - treatment_actions: List[str]
+    - preventive_actions: List[str]
+    - warnings: List[str]
     """
 
-    docs_text = "\n\n---\n\n".join(chunk["text"] for chunk in context_chunks)
+    contexte = "\n\n---\n\n".join([c["text"] for c in context_chunks])
 
     prompt = f"""
-Vous êtes un conseiller viticole en France.
+Tu es un expert viticole spécialisé dans la protection de la vigne.
 
-Vous devez proposer un plan d'action court, synthétique et scientifique pour un viticulteur.
-
-Vous devez répondre uniquement à partir des informations fournies dans les extraits de documentation.
-Si les informations sont insuffisantes, dites-le explicitement et conseillez de consulter un technicien local.
-
-Contexte:
-- Maladie détectée : {disease_name_fr} (label CNN : {cnn_label})
-- Mode de conduite : {mode}
-- Gravité observée : {severity}
+Contexte de la situation :
+- Maladie détectée (label CNN) : "{cnn_label}"
+- Maladie (nom détaillé) : "{disease_name_fr}"
+- Mode de conduite : "{mode}"
+- Gravité : "{severity}"
 - Surface concernée : {area_m2} m²
-- Période de l'année : {season}
+- Saison : "{season}"
 
-Extraits de documentation (à utiliser obligatoirement) :
-{docs_text}
+Base de connaissances (extraits de fiches techniques) :
+{contexte}
 
-Consignes de réponse :
-- Répondez en français.
-- Adressez-vous au viticulteur en utilisant "vous".
-- Soyez factuel, prudent et scientifique.
-- Structurez la réponse en 4 parties :
-  1. Diagnostic rapide
-  2. Actions de traitement immédiates
-  3. Mesures préventives
-  4. Rappels de sécurité et de réglementation
+Ta tâche est de :
+1) Proposer un DIAGNOSTIC synthétique.
+2) Proposer des ACTIONS DE TRAITEMENT concrètes et applicables.
+3) Proposer des MESURES PRÉVENTIVES pour la suite de la saison.
+4) Rappeler les AVERTISSEMENTS de sécurité ou de réglementation.
+
+CONTRAINTE TRÈS IMPORTANTE :
+Tu dois répondre avec un UNIQUE objet JSON, valide, SANS texte avant ou après, SANS explication.
+Utilise exactement les clés suivantes :
+
+{{
+  "diagnostic": "texte court (3 à 5 phrases max) expliquant la situation.",
+  "treatment_actions": [
+    "Action de traitement 1 (précise, opérationnelle).",
+    "Action de traitement 2."
+  ],
+  "preventive_actions": [
+    "Action préventive 1.",
+    "Action préventive 2."
+  ],
+  "warnings": [
+    "Avertissement 1 (sécurité, réglementation, délais avant récolte, etc.).",
+    "Avertissement 2."
+  ]
+}}
+
+Règles :
+- Écris en français.
+- Reste concret, clair et opérationnel pour un viticulteur.
+- Ne parle pas de toi, ne t'excuse pas, ne remercie pas.
+- Ne mets PAS de ```json ou de balise de code autour du JSON.
+- Ne mets PAS de virgule finale après le dernier élément d'une liste.
+- Ne mets AUCUN texte en dehors du JSON.
+
+Répond maintenant en fournissant uniquement l'objet JSON.
 """
-
     return prompt.strip()
