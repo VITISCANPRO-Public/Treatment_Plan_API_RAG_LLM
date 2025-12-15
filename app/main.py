@@ -36,6 +36,9 @@ app = FastAPI(
 def health_check():
     return {"status": "ok"}
 
+@app.get("/")
+def root():
+    return {"status": "ok"}
 
 @app.post("/solutions", response_model=SolutionResponse)
 def get_solutions(

@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 from typing import Dict, Any, List
-
+import re
 from app.dosage_rules import compute_dosage
 from app.weaviate_client import weaviate_client, search_treatment_chunks
 from app.prompts import build_treatment_prompt
@@ -57,6 +57,9 @@ def parse_llm_structured_response(raw: str) -> Dict[str, Any]:
         # On vire un éventuel préfixe "json\n"
         text = text.replace("json\n", "").replace("json\r\n", "").strip()
 
+        m = re.search(r"\{[\s\S]*\}", text)
+        if m:
+            text = m.group(0).strip()
     # 2) On essaie de parser le JSON
     try:
         data = json.loads(text)
@@ -107,6 +110,33 @@ def infer_season_from_date(date_iso: str) -> str:
         return "automne"
     return "inconnue"
 
+CNN_LABEL_ALIASES = {
+    # FR (UI)
+    "mildiou": "Grape_Downy_mildew_leaf",
+    "oïdium": "Grape_Powdery_mildew_leaf",
+    "oidium": "Grape_Powdery_mildew_leaf",
+    "tache brune": "Grape_Brown_spot_leaf",
+    "tache_brune": "Grape_Brown_spot_leaf",
+    "anthracnose": "Grape_Anthracnose_leaf",
+    "acariens": "Grape_Mites_leaf_disease",
+    "mites": "Grape_Mites_leaf_disease",
+    "shot_hole": "Grape_shot_hole_leaf_disease",
+    "sain": "Grape_Normal_leaf",
+    "normal": "Grape_Normal_leaf",
+    "downy_mildew": "Grape_Downy_mildew_leaf",
+    "powdery_mildew": "Grape_Powdery_mildew_leaf",
+    "brown_spot": "Grape_Brown_spot_leaf",
+}
+
+def normalize_cnn_label(raw: str) -> str:
+    if not raw:
+        return raw
+    key = raw.strip()
+    # si déjà un label CNN exact, on le garde
+    if key.startswith("Grape_"):
+        return key
+    return CNN_LABEL_ALIASES.get(key.lower(), key)
+
 def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Pipeline principal :
@@ -124,9 +154,14 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     season = infer_season_from_date(date_iso)
 
+    cnn_label = normalize_cnn_label(payload["cnn_label"])
+
     # 2. Récupération des chunks dans Weaviate
     with weaviate_client() as client:
         chunks = search_treatment_chunks(client, cnn_label, mode, severity)
+        if not chunks:
+            chunks = search_treatment_chunks(client, cnn_label, None, severity)  # sans mode filter
+            # option: rerank: mode match d'abord
 
     # 3. Si aucun chunk, on renvoie un plan basé uniquement sur les règles de dosage.
     dosage = compute_dosage(cnn_label, mode, area_m2)
