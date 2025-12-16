@@ -1,14 +1,16 @@
 import json
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import re
 import os
 from app.dosage_rules import compute_dosage
-from app.weaviate_client import weaviate_client, search_treatment_chunks
-from app.prompts import build_treatment_prompt
+from app.weaviate_client_local import weaviate_client, search_treatment_chunks
+from app.prompts_local import build_treatment_prompt
 from app.llm_client import call_llm, LLMError
 
-DEBUG = False
+disable_weaviate = os.getenv("DISABLE_WEAVIATE", "0") == "1"
+
+print(">>> RAG PIPELINE LOCAL CHARGÉ <<<")
 
 def _to_str_list(value: Any) -> List[str]:
     """
@@ -146,41 +148,22 @@ def infer_season_from_date(date_iso: str) -> str:
     return "inconnue"
 
 CNN_LABEL_ALIASES = {
+    # FR (UI)
+    "mildiou": "Grape_Downy_mildew_leaf",
+    "oïdium": "Grape_Powdery_mildew_leaf",
+    "oidium": "Grape_Powdery_mildew_leaf",
+    "tache brune": "Grape_Brown_spot_leaf",
+    "tache_brune": "Grape_Brown_spot_leaf",
     "anthracnose": "Grape_Anthracnose_leaf",
-    "brown_spot": "Grape_Brown_spot_leaf",
-    "downy_mildew": "Grape_Downy_mildew_leaf",
+    "acariens": "Grape_Mites_leaf_disease",
     "mites": "Grape_Mites_leaf_disease",
+    "shot_hole": "Grape_shot_hole_leaf_disease",
+    "sain": "Grape_Normal_leaf",
     "normal": "Grape_Normal_leaf",
+    "downy_mildew": "Grape_Downy_mildew_leaf",
     "powdery_mildew": "Grape_Powdery_mildew_leaf",
-    "shot_hole": "Grape_shot_hole_leaf_disease"
+    "brown_spot": "Grape_Brown_spot_leaf",
 }
-
-CNN_LABEL_FR = {
-    "anthracnose": "Anthracnose",
-    "brown_spot": "Tâche brune",
-    "downy_mildew": "Mildiou",
-    "mites": "Acariens",
-    "normal": "Pas de maladie",
-    "powdery_mildew": "Oïdium",
-    "shot_hole": "Coryneum",
-}
-
-DISEASE_TRANSLATION = {
-    "anthracnose": "Anthracnose",
-    "brown_spot": "Tâche brune",
-    "downy_mildew": "Mildiou",
-    "mites": "Acariens",
-    "normal": "Pas de maladie",
-    "powdery_mildew": "Oïdium",
-    "shot_hole": "Coryneum",
-}
-
-def cnn_label_to_fr(raw_label: str) -> str:
-    if not raw_label:
-        return raw_label
-
-    key = raw_label.strip().lower()
-    return CNN_LABEL_FR.get(key, raw_label)
 
 def normalize_cnn_label(raw: str) -> str:
     if not raw:
@@ -254,7 +237,7 @@ def _heuristic_parse_from_text(text: str) -> Dict[str, Any]:
     out["warnings"] = extract_list("warnings")
     return out
 
-def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
+def generate_treatment_advice(payload: Dict[str, Any], debug: bool = False) -> Dict[str, Any]:
     """
     Pipeline principal :
     1) Déduit la saison à partir de la date.
@@ -271,10 +254,27 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     season = infer_season_from_date(date_iso)
 
-    cnn_label_normalized = normalize_cnn_label(payload["cnn_label"])
+    cnn_label = normalize_cnn_label(payload["cnn_label"])
 
     # 2. Récupération des chunks dans Weaviate
-    with weaviate_client() as client:
+    chunks = []
+    if disable_weaviate:
+        chunks = [
+            {
+                "text": "Mildiou (downy mildew) : privilégier une intervention rapide après pluie, surveiller les foyers, renouveler la protection selon conditions. Respecter les doses homologuées et la réglementation locale.",
+                "section": "Traitement",
+                "disease_id": "Grape_Downy_mildew_leaf",
+                "nom_fr": "Mildiou"
+            },
+            {
+                "text": "Prévention : aérer le feuillage (effeuillage si nécessaire), limiter l’humidité, surveiller météo et pression maladie, éviter excès d’azote.",
+                "section": "Prévention",
+                "disease_id": "Grape_Downy_mildew_leaf",
+                "nom_fr": "Mildiou"
+            }
+        ]
+    else:
+        with weaviate_client() as client:
             chunks = search_treatment_chunks(
                 client=client,
                 disease_input=cnn_label,
@@ -282,12 +282,9 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
                 severity=severity,
                 top_k=8,
             )
-    if not chunks:
-            chunks = search_treatment_chunks(client, cnn_label_normalized, None, severity)  # sans mode filter
-            # option: rerank: mode match d'abord
 
     # 3. Si aucun chunk, on renvoie un plan basé uniquement sur les règles de dosage.
-    dosage = compute_dosage(cnn_label_normalized, mode, area_m2)
+    dosage = compute_dosage(cnn_label, mode, area_m2)
     if not chunks:
         return {
             "cnn_label": cnn_label,
@@ -312,7 +309,7 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     # 4. Construction du prompt à partir des chunks RAG.
-    disease_name_fr = DISEASE_TRANSLATION.get(cnn_label)
+    disease_name_fr = chunks[0].get("nom_fr", cnn_label)
     prompt = build_treatment_prompt(
         cnn_label=cnn_label,
         disease_name_fr=disease_name_fr,
@@ -323,7 +320,7 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
         context_chunks=[{"text": c["text"]} for c in chunks],
     )
 
-    if DEBUG:
+    if debug:
         print("\n===== PROMPT ENVOYÉ AU LLM =====\n")
         print(prompt)
 
@@ -388,7 +385,6 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     result = {
         "cnn_label": cnn_label,
-        "cnn_label_fr": cnn_label_to_fr(payload["cnn_label"]),
         "mode": mode,
         "area_m2": area_m2,
         "severity": severity,
@@ -397,7 +393,6 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
         "treatment_actions": treatment_actions,
         "preventive_actions": preventive_actions,
         "warnings": warnings,
-        "raw_llm_output": raw_llm_text
     }
 
     if debug:
