@@ -336,7 +336,7 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
             top_p=0.9
         )
 
-        if debug:
+        if DEBUG:
             print("\n===== RAW LLM TEXT =====\n")
             print(raw_llm_text)
 
@@ -352,7 +352,7 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
             parsed["diagnostic"] = fallback_text
 
     except LLMError as e:
-        if debug:
+        if DEBUG:
             print("\n===== ERREUR LLM =====\n")
             print(f"Erreur LLM : {e}")
 
@@ -400,7 +400,7 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
         "raw_llm_output": raw_llm_text
     }
 
-    if debug:
+    if DEBUG:
         result["raw_llm_output"] = raw_llm_text    
         print("\n===== RÉPONSE FINALE RETOURNÉE PAR generate_treatment_advice =====\n")
         print(result)
