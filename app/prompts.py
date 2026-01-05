@@ -69,6 +69,15 @@ Règles :
 - Ne mets PAS de virgule finale après le dernier élément d'une liste.
 - Ne mets AUCUN texte en dehors du JSON.
 
+FORMAT (OBLIGATOIRE) :
+- "treatment_actions", "preventive_actions" et "warnings" doivent être des tableaux JSON (List[str]) uniquement.
+- Interdiction de représenter une liste sous forme d'objet avec des clés "0:", "1:", etc.
+- Interdiction d'utiliser des listes Markdown (ex: "- ...", "* ...", "1) ...").
+- Chaque élément de liste doit être une chaîne de caractères simple, sans préfixe de numérotation.
+- Chaque élément doit faire 1 à 2 phrases max, et éviter les formats "Action: ..." (pas de paires clé/valeur).
+- Vise 2 à 6 éléments par liste.
+- Avant de répondre, vérifie que ton JSON passe un json.loads.
+
 Répond maintenant en fournissant uniquement l'objet JSON.
 """
     return prompt.strip()

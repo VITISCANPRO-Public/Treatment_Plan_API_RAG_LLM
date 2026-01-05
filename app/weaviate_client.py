@@ -34,34 +34,35 @@ def get_embedder() -> SentenceTransformer:
 
 @contextmanager
 def weaviate_client():
-    url = os.getenv("WEAVIATE_URL")
-    api_key = os.getenv("WEAVIATE_API_KEY") 
+    url = (os.getenv("WEAVIATE_URL") or "").strip()
+    api_key = (os.getenv("WEAVIATE_API_KEY") or "").strip()
+
+    # Sécurité prod : on refuse localhost si pas de URL cloud
+    if not url and (os.getenv("HF_SPACE_ID") or os.getenv("SPACE_ID") or os.getenv("K_SERVICE")):
+        raise RuntimeError(
+            "WEAVIATE_URL manquant en environnement déployé. "
+            "Renseigne WEAVIATE_URL et WEAVIATE_API_KEY dans Hugging Face Secrets."
+        )
 
     if url:
         auth = weaviate.auth.AuthApiKey(api_key) if api_key else None
-
         client = weaviate.connect_to_weaviate_cloud(
             cluster_url=url,
             auth_credentials=auth,
-            additional_config=AdditionalConfig(
-                timeout=Timeout(init=30, query=60, insert=60)
-            ),
+            additional_config=AdditionalConfig(timeout=Timeout(init=30, query=60, insert=60)),
         )
     else:
         client = weaviate.connect_to_local(
             host="localhost",
             port=8080,
             grpc_port=50051,
-            additional_config=AdditionalConfig(
-                timeout=Timeout(init=30, query=60, insert=60)
-            ),
+            additional_config=AdditionalConfig(timeout=Timeout(init=30, query=60, insert=60)),
         )
 
     try:
         yield client
     finally:
         client.close()
-
 
 # ---------- Recherche de chunks de traitement ----------
 

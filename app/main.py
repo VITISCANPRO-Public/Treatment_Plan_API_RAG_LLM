@@ -4,7 +4,6 @@ from typing import Optional, Dict, Any
 
 from .rag_pipeline import generate_treatment_advice
 
-
 class SolutionRequest(BaseModel):
     cnn_label: str = Field(..., description="Label de la maladie prédite par le CNN")
     mode: str = Field(..., description="Mode de conduite : 'bio' ou 'conventionnel'")

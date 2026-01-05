@@ -55,7 +55,7 @@ def get_solutions(
     # ⚠️ Pydantic v2 : on utilise model_dump() au lieu de dict()
     payload = request.model_dump()
 
-    advice = generate_treatment_advice(payload, debug=debug)
+    advice = generate_treatment_advice(payload)
 
     # Si on n'est pas en mode debug, on cache le raw_llm_output
     if not debug:

@@ -1,6 +1,6 @@
 import json
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import re
 import os
 from app.dosage_rules import compute_dosage
@@ -147,18 +147,31 @@ def infer_season_from_date(date_iso: str) -> str:
 
 CNN_LABEL_ALIASES = {
     "anthracnose": "Grape_Anthracnose_leaf",
+    "black_rot": "Grape_Black_rot_leaf",
     "brown_spot": "Grape_Brown_spot_leaf",
+    "colomerus_vitis": "Grape_Erinose_leaf",
     "downy_mildew": "Grape_Downy_mildew_leaf",
+    "elsinoe_ampelina": "Grape_Anthracnose_leaf",
+    "erinose": "Grape_Erinose_leaf",
+    "erysiphe_necator": "Grape_Powdery_mildew_leaf",
+    "esca": "Grape_Esca_leaf",
+    "guignardia_bidwellii": "Grape_Black_rot_leaf",
     "mites": "Grape_Mites_leaf_disease",
     "normal": "Grape_Normal_leaf",
+    "phaeomoniella_chlamydospora": "Grape_Esca_leaf",
+    "plasmopara_viticola": "Grape_Downy_mildew_leaf",
     "powdery_mildew": "Grape_Powdery_mildew_leaf",
-    "shot_hole": "Grape_shot_hole_leaf_disease"
+    "sain": "healthy",
+    "shot_hole": "Grape_shot_hole_leaf_disease",
 }
 
 CNN_LABEL_FR = {
     "anthracnose": "Anthracnose",
     "brown_spot": "Tâche brune",
+    "black_rot": "Pourriture noire",
     "downy_mildew": "Mildiou",
+    "erinose": "Érinose",
+    "esca": "Esca",
     "mites": "Acariens",
     "normal": "Pas de maladie",
     "powdery_mildew": "Oïdium",
@@ -168,7 +181,10 @@ CNN_LABEL_FR = {
 DISEASE_TRANSLATION = {
     "anthracnose": "Anthracnose",
     "brown_spot": "Tâche brune",
+    "black_rot": "Pourriture noire de la vigne",
     "downy_mildew": "Mildiou",
+    "erinose": "Érinose de la vigne",
+    "esca": "Esca de la vigne",
     "mites": "Acariens",
     "normal": "Pas de maladie",
     "powdery_mildew": "Oïdium",
@@ -264,8 +280,8 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
     5) Retourne une réponse structurée pour l'API.
     """
     cnn_label = payload["cnn_label"]
-    mode = payload["mode"]
-    severity = payload["severity"]
+    mode = str(payload["mode"]).strip().lower()
+    severity = str(payload["severity"]).strip().lower()
     area_m2 = float(payload["area_m2"])
     date_iso = payload.get("date_iso", "")
 
@@ -275,41 +291,45 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # 2. Récupération des chunks dans Weaviate
     with weaviate_client() as client:
+        chunks = search_treatment_chunks(
+            client=client,
+            disease_input=cnn_label,
+            mode=mode,
+            severity=severity,
+            top_k=8,
+        )
+        if not chunks:
             chunks = search_treatment_chunks(
                 client=client,
-                disease_input=cnn_label,
-                mode=mode,
+                disease_input=cnn_label_normalized,
+                mode=None,
                 severity=severity,
                 top_k=8,
             )
-    if not chunks:
-            chunks = search_treatment_chunks(client, cnn_label_normalized, None, severity)  # sans mode filter
-            # option: rerank: mode match d'abord
+        if not chunks:
+            disease_id_guess = f"grape_{cnn_label.strip().lower()}"
+            chunks = search_treatment_chunks(
+                client=client,
+                disease_input=disease_id_guess,
+                mode=None,
+                severity=severity,
+                top_k=8,
+            )
 
     # 3. Si aucun chunk, on renvoie un plan basé uniquement sur les règles de dosage.
-    dosage = compute_dosage(cnn_label_normalized, mode, area_m2)
-    if not chunks:
-        return {
-            "cnn_label": cnn_label,
-            "mode": mode,
-            "area_m2": area_m2,
-            "severity": severity,
-            "season": season,
-            "treatment_plan": dosage,
-            "diagnostic": (
-                "Les informations disponibles sur cette maladie sont insuffisantes "
-                "pour proposer un traitement fiable à partir de la base de connaissances. "
-                "Nous vous recommandons de consulter un technicien viticole local."
-            ),
-            "treatment_actions": [],
-            "preventive_actions": [],
-            "warnings": [
-                "Ces recommandations sont indicatives.",
-                "Vérifiez la réglementation locale et les notices des produits avant application.",
-            ],
-            "advice_text": "",
-            "raw_llm_output": "",
+    dosage = compute_dosage(cnn_label_normalized, mode, area_m2, severity=severity)
+    if not dosage:
+        dosage = {
+            "note": "Aucune règle de dosage disponible pour ce cas (label/mode/sévérité)."
         }
+
+    if not chunks:
+        chunks = [{
+            "text": (
+                "Aucun extrait pertinent n'a été trouvé dans la base de connaissances. "
+                "Base uniquement sur les règles de dosage et les bonnes pratiques générales."
+            )
+        }]
 
     # 4. Construction du prompt à partir des chunks RAG.
     disease_name_fr = DISEASE_TRANSLATION.get(cnn_label)
@@ -371,9 +391,6 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
         }
         raw_llm_text = fallback_text
 
-    # 6. Calcul des dosages avec les règles métiers.
-    dosage = compute_dosage(cnn_label, mode, area_m2)
-
     # Warnings de base + warnings issus du LLM
     base_warnings = [
         "Ces recommandations sont indicatives.",
@@ -393,6 +410,7 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
         "area_m2": area_m2,
         "severity": severity,
         "season": season,
+        "treatment_plan": dosage,
         "diagnostic": diagnostic_text,
         "treatment_actions": treatment_actions,
         "preventive_actions": preventive_actions,

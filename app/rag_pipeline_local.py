@@ -10,6 +10,8 @@ from app.llm_client import call_llm, LLMError
 
 disable_weaviate = os.getenv("DISABLE_WEAVIATE", "0") == "1"
 
+DEBUG = False
+
 print(">>> RAG PIPELINE LOCAL CHARGÉ <<<")
 
 def _to_str_list(value: Any) -> List[str]:
@@ -148,22 +150,41 @@ def infer_season_from_date(date_iso: str) -> str:
     return "inconnue"
 
 CNN_LABEL_ALIASES = {
-    # FR (UI)
-    "mildiou": "Grape_Downy_mildew_leaf",
-    "oïdium": "Grape_Powdery_mildew_leaf",
-    "oidium": "Grape_Powdery_mildew_leaf",
-    "tache brune": "Grape_Brown_spot_leaf",
-    "tache_brune": "Grape_Brown_spot_leaf",
     "anthracnose": "Grape_Anthracnose_leaf",
-    "acariens": "Grape_Mites_leaf_disease",
-    "mites": "Grape_Mites_leaf_disease",
-    "shot_hole": "Grape_shot_hole_leaf_disease",
-    "sain": "Grape_Normal_leaf",
-    "normal": "Grape_Normal_leaf",
-    "downy_mildew": "Grape_Downy_mildew_leaf",
-    "powdery_mildew": "Grape_Powdery_mildew_leaf",
     "brown_spot": "Grape_Brown_spot_leaf",
+    "downy_mildew": "Grape_Downy_mildew_leaf",
+    "mites": "Grape_Mites_leaf_disease",
+    "normal": "Grape_Normal_leaf",
+    "powdery_mildew": "Grape_Powdery_mildew_leaf",
+    "shot_hole": "Grape_shot_hole_leaf_disease"
 }
+
+CNN_LABEL_FR = {
+    "anthracnose": "Anthracnose",
+    "brown_spot": "Tâche brune",
+    "downy_mildew": "Mildiou",
+    "mites": "Acariens",
+    "normal": "Pas de maladie",
+    "powdery_mildew": "Oïdium",
+    "shot_hole": "Coryneum",
+}
+
+DISEASE_TRANSLATION = {
+    "anthracnose": "Anthracnose",
+    "brown_spot": "Tâche brune",
+    "downy_mildew": "Mildiou",
+    "mites": "Acariens",
+    "normal": "Pas de maladie",
+    "powdery_mildew": "Oïdium",
+    "shot_hole": "Coryneum",
+}
+
+def cnn_label_to_fr(raw_label: str) -> str:
+    if not raw_label:
+        return raw_label
+
+    key = raw_label.strip().lower()
+    return CNN_LABEL_FR.get(key, raw_label)
 
 def normalize_cnn_label(raw: str) -> str:
     if not raw:
@@ -237,7 +258,7 @@ def _heuristic_parse_from_text(text: str) -> Dict[str, Any]:
     out["warnings"] = extract_list("warnings")
     return out
 
-def generate_treatment_advice(payload: Dict[str, Any], debug: bool = False) -> Dict[str, Any]:
+def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Pipeline principal :
     1) Déduit la saison à partir de la date.
@@ -254,7 +275,7 @@ def generate_treatment_advice(payload: Dict[str, Any], debug: bool = False) -> D
 
     season = infer_season_from_date(date_iso)
 
-    cnn_label = normalize_cnn_label(payload["cnn_label"])
+    cnn_label_normalized = normalize_cnn_label(payload["cnn_label"])
 
     # 2. Récupération des chunks dans Weaviate
     chunks = []
@@ -284,7 +305,7 @@ def generate_treatment_advice(payload: Dict[str, Any], debug: bool = False) -> D
             )
 
     # 3. Si aucun chunk, on renvoie un plan basé uniquement sur les règles de dosage.
-    dosage = compute_dosage(cnn_label, mode, area_m2)
+    dosage = compute_dosage(cnn_label_normalized, mode, area_m2)
     if not chunks:
         return {
             "cnn_label": cnn_label,
@@ -320,7 +341,7 @@ def generate_treatment_advice(payload: Dict[str, Any], debug: bool = False) -> D
         context_chunks=[{"text": c["text"]} for c in chunks],
     )
 
-    if debug:
+    if DEBUG:
         print("\n===== PROMPT ENVOYÉ AU LLM =====\n")
         print(prompt)
 
@@ -333,7 +354,7 @@ def generate_treatment_advice(payload: Dict[str, Any], debug: bool = False) -> D
             top_p=0.9
         )
 
-        if debug:
+        if DEBUG:
             print("\n===== RAW LLM TEXT =====\n")
             print(raw_llm_text)
 
@@ -349,7 +370,7 @@ def generate_treatment_advice(payload: Dict[str, Any], debug: bool = False) -> D
             parsed["diagnostic"] = fallback_text
 
     except LLMError as e:
-        if debug:
+        if DEBUG:
             print("\n===== ERREUR LLM =====\n")
             print(f"Erreur LLM : {e}")
 
@@ -368,9 +389,6 @@ def generate_treatment_advice(payload: Dict[str, Any], debug: bool = False) -> D
         }
         raw_llm_text = fallback_text
 
-    # 6. Calcul des dosages avec les règles métiers.
-    dosage = compute_dosage(cnn_label, mode, area_m2)
-
     # Warnings de base + warnings issus du LLM
     base_warnings = [
         "Ces recommandations sont indicatives.",
@@ -385,17 +403,20 @@ def generate_treatment_advice(payload: Dict[str, Any], debug: bool = False) -> D
 
     result = {
         "cnn_label": cnn_label,
+        "cnn_label_fr": cnn_label_to_fr(payload["cnn_label"]),
         "mode": mode,
         "area_m2": area_m2,
         "severity": severity,
         "season": season,
+        "treatment_plan": dosage,
         "diagnostic": diagnostic_text,
         "treatment_actions": treatment_actions,
         "preventive_actions": preventive_actions,
         "warnings": warnings,
+        "raw_llm_output": raw_llm_text
     }
 
-    if debug:
+    if DEBUG:
         result["raw_llm_output"] = raw_llm_text    
         print("\n===== RÉPONSE FINALE RETOURNÉE PAR generate_treatment_advice =====\n")
         print(result)
