@@ -1,28 +1,27 @@
-# app/weaviate_client.py
+"""
+weaviate_client.py — Weaviate connection manager and RAG search functions.
+"""
 
 import os
-from typing import List, Dict, Optional, Tuple, Any
 from contextlib import contextmanager
-from typing import Any
-from dotenv import load_dotenv
+from typing import Any, Dict, List, Optional
+
 import weaviate
 import weaviate.classes as wvc
-from weaviate.classes.init import AdditionalConfig, Timeout
+from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
+from weaviate.classes.init import AdditionalConfig, Timeout
 
 load_dotenv()
 
-WEAVIATE_URL = os.getenv("WEAVIATE_URL")
-WEAVIATE_API_KEY = os.getenv("WEAVIATE_API_KEY")
-
-# ---------- Embedder global ----------
+# ── Embedder (loaded once globally) ───────────────────────────────────────────
 
 _EMBEDDER: Optional[SentenceTransformer] = None
 
 
 def get_embedder() -> SentenceTransformer:
     """
-    Retourne un modèle SentenceTransformer (chargé une seule fois).
+    Returns a SentenceTransformer model, loaded once and reused.
     """
     global _EMBEDDER
     if _EMBEDDER is None:
@@ -30,18 +29,28 @@ def get_embedder() -> SentenceTransformer:
     return _EMBEDDER
 
 
-# ---------- Client Weaviate (context manager) ----------
+# ── Weaviate client (context manager) ─────────────────────────────────────────
 
 @contextmanager
 def weaviate_client():
-    url = (os.getenv("WEAVIATE_URL") or "").strip()
+    """
+    Context manager that opens and closes the Weaviate connection.
+    - If WEAVIATE_URL is set: connects to Weaviate Cloud.
+    - Otherwise: connects to local instance (localhost:8080).
+    Raises RuntimeError if deployed without WEAVIATE_URL configured.
+    """
+    url     = (os.getenv("WEAVIATE_URL") or "").strip()
     api_key = (os.getenv("WEAVIATE_API_KEY") or "").strip()
 
-    # Sécurité prod : on refuse localhost si pas de URL cloud
-    if not url and (os.getenv("HF_SPACE_ID") or os.getenv("SPACE_ID") or os.getenv("K_SERVICE")):
+    # Safety check: refuse localhost in deployed environments
+    if not url and (
+        os.getenv("HF_SPACE_ID") or
+        os.getenv("SPACE_ID") or
+        os.getenv("K_SERVICE")
+    ):
         raise RuntimeError(
-            "WEAVIATE_URL manquant en environnement déployé. "
-            "Renseigne WEAVIATE_URL et WEAVIATE_API_KEY dans Hugging Face Secrets."
+            "WEAVIATE_URL is missing in deployed environment. "
+            "Set WEAVIATE_URL and WEAVIATE_API_KEY in HuggingFace Secrets."
         )
 
     if url:
@@ -49,14 +58,18 @@ def weaviate_client():
         client = weaviate.connect_to_weaviate_cloud(
             cluster_url=url,
             auth_credentials=auth,
-            additional_config=AdditionalConfig(timeout=Timeout(init=30, query=60, insert=60)),
+            additional_config=AdditionalConfig(
+                timeout=Timeout(init=30, query=60, insert=60)
+            ),
         )
     else:
         client = weaviate.connect_to_local(
             host="localhost",
             port=8080,
             grpc_port=50051,
-            additional_config=AdditionalConfig(timeout=Timeout(init=30, query=60, insert=60)),
+            additional_config=AdditionalConfig(
+                timeout=Timeout(init=30, query=60, insert=60)
+            ),
         )
 
     try:
@@ -64,7 +77,8 @@ def weaviate_client():
     finally:
         client.close()
 
-# ---------- Recherche de chunks de traitement ----------
+
+# ── RAG search ─────────────────────────────────────────────────────────────────
 
 def search_treatment_chunks(
     client: weaviate.WeaviateClient,
@@ -74,57 +88,51 @@ def search_treatment_chunks(
     top_k: int = 8,
 ) -> List[Dict[str, Any]]:
     """
-    Retrieval RAG robuste :
-    - accepte disease_input au format "downy_mildew" ou "Grape_Downy_mildew_leaf"
-    - filtre par (cnn_label == ...) OR (disease_id == ...)
-    - filtre mode_conduite si fourni, sinon pas de filtre mode
-    - fallback : si 0 résultat avec mode -> relance sans mode
-    """
+    Robust RAG retrieval:
+    - Accepts disease_input as INRAE scientific name (e.g. 'plasmopara_viticola')
+    - Filters by (cnn_label == ...) OR (disease_id == ...)
+    - Filters by farming_mode if provided, otherwise no mode filter
+    - Fallback: if 0 results with mode filter → retries without mode filter
 
+    Args:
+        client: Active Weaviate client
+        disease_input: CNN label or disease ID
+        mode: Farming mode ('conventional' or 'organic')
+        severity: Severity level ('low', 'moderate', 'high')
+        top_k: Maximum number of chunks to return
+
+    Returns:
+        List of chunk dicts with text and metadata
+    """
     try:
         collection = client.collections.get("VitiScanKnowledge")
     except Exception as e:
-        print(f"[RAG] Collection VitiScanKnowledge introuvable: {e}")
+        print(f"[RAG] Collection VitiScanKnowledge not found: {e}")
         return []
 
-    # Normalisation légère
     key = (disease_input or "").strip()
     if not key:
         return []
 
-    # Heuristique : si on reçoit "Grape_..." => c'est plutôt cnn_label
-    # sinon => c'est plutôt disease_id (ex: downy_mildew)
-    cnn_label_value = key if key.startswith("Grape_") else None
-    disease_id_value = None if key.startswith("Grape_") else key
-
-    # Query text (sert à l'embedding)
+    # Build query text for embedding
     query_text = (
-        f"Recommandations de traitement vigne pour {key}. "
-        f"Mode: {mode or 'non spécifié'}. Gravité: {severity or 'non spécifiée'}. "
-        "Inclure diagnostic, actions curatives, prévention, et précautions."
+        f"Treatment recommendations for grapevine disease: {key}. "
+        f"Farming mode: {mode or 'unspecified'}. Severity: {severity or 'unspecified'}. "
+        "Include diagnosis, curative actions, prevention and safety precautions."
     )
 
-    embedder = get_embedder()
-    query_vector = embedder.encode(query_text).tolist()
+    query_vector = get_embedder().encode(query_text).tolist()
 
-    # Filtre maladie: cnn_label OU disease_id
-    filters = []
-    if cnn_label_value:
-        filters.append(wvc.query.Filter.by_property("cnn_label").equal(cnn_label_value))
-    if disease_id_value:
-        filters.append(wvc.query.Filter.by_property("disease_id").equal(disease_id_value))
-
-    if not filters:
-        return []
-
-    disease_filter = filters[0]
-    for f in filters[1:]:
-        disease_filter = disease_filter | f
+    # Disease filter: match cnn_label OR disease_id
+    disease_filter = (
+        wvc.query.Filter.by_property("cnn_label").equal(key) |
+        wvc.query.Filter.by_property("disease_id").equal(key)
+    )
 
     def run_query(with_mode: bool) -> List[Dict[str, Any]]:
         where_filter = disease_filter
         if with_mode and mode:
-            mode_filter = wvc.query.Filter.by_property("mode_conduite").contains_any([mode])
+            mode_filter = wvc.query.Filter.by_property("farming_mode").contains_any([mode])
             where_filter = where_filter & mode_filter
 
         try:
@@ -135,38 +143,37 @@ def search_treatment_chunks(
                 return_metadata=wvc.query.MetadataQuery(distance=True),
             )
         except Exception as e:
-            print(f"[RAG] Erreur near_vector: {e}")
+            print(f"[RAG] near_vector error: {e}")
             return []
 
-        chunks: List[Dict[str, Any]] = []
+        chunks = []
         for obj in response.objects:
             props = obj.properties or {}
-            text = props.get("text", "")
+            text  = props.get("text", "")
             if not text:
                 continue
 
-            meta = getattr(obj, "metadata", None)
+            meta     = getattr(obj, "metadata", None)
             distance = getattr(meta, "distance", None) if meta else None
 
-            chunks.append(
-                {
-                    "text": text,
-                    "section": props.get("section", ""),
-                    "disease_id": props.get("disease_id", ""),
-                    "cnn_label": props.get("cnn_label", ""),
-                    "nom_fr": props.get("nom_fr", ""),
-                    "mode_conduite": props.get("mode_conduite", None),
-                    "distance": distance,
-                }
-            )
+            chunks.append({
+                "text":         text,
+                "section":      props.get("section", ""),
+                "disease_id":   props.get("disease_id", ""),
+                "cnn_label":    props.get("cnn_label", ""),
+                "disease_name": props.get("disease_name", ""),
+                "farming_mode": props.get("farming_mode", None),
+                "distance":     distance,
+            })
 
         return chunks
 
-    # 1) Essai avec filtre mode
+    # First attempt: with farming_mode filter
     chunks = run_query(with_mode=True)
 
-    # 2) Fallback sans filtre mode si vide
+    # Fallback: without farming_mode filter if no results
     if not chunks:
+        print(f"[RAG] No results with mode filter '{mode}', retrying without mode filter...")
         chunks = run_query(with_mode=False)
 
     return chunks

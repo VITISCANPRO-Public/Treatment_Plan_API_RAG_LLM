@@ -1,226 +1,109 @@
+"""
+rag_pipeline.py — Main RAG pipeline for treatment plan generation.
+
+Pipeline steps:
+1. Infer season from date
+2. Retrieve relevant knowledge chunks from Weaviate
+3. Build RAG prompt and call LLM
+4. Compute dosage via dosage_rules
+5. Return structured response for the API
+"""
+
 import json
-from datetime import datetime
-from typing import Dict, Any, List, Optional
 import re
-import os
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
 from app.dosage_rules import compute_dosage
-from app.weaviate_client import weaviate_client, search_treatment_chunks
+from app.llm_client import LLMError, call_llm
 from app.prompts import build_treatment_prompt
-from app.llm_client import call_llm, LLMError
+from app.weaviate_client import search_treatment_chunks, weaviate_client
 
 DEBUG = False
 
+# ── Disease label mapping (INRAE labels → English names) ──────────────────────
+
+DISEASE_NAMES: Dict[str, str] = {
+    "colomerus_vitis":             "Erinose",
+    "elsinoe_ampelina":            "Anthracnose",
+    "erysiphe_necator":            "Powdery Mildew",
+    "guignardia_bidwellii":        "Black Rot",
+    "healthy":                     "Healthy",
+    "phaeomoniella_chlamydospora": "Esca",
+    "plasmopara_viticola":         "Downy Mildew",
+}
+
+
+# ── Helper functions ───────────────────────────────────────────────────────────
+
+def infer_season_from_date(date_iso: str) -> str:
+    """
+    Infers a simplified season from an ISO date string (YYYY-MM-DD).
+
+    Returns:
+        Season string: 'winter', 'spring', 'summer', 'autumn', or 'unknown'
+    """
+    if not date_iso:
+        return "unknown"
+
+    try:
+        month = datetime.fromisoformat(date_iso).month
+    except ValueError:
+        return "unknown"
+
+    if month in (12, 1, 2):
+        return "winter"
+    if month in (3, 4, 5):
+        return "spring"
+    if month in (6, 7, 8):
+        return "summer"
+    if month in (9, 10, 11):
+        return "autumn"
+    return "unknown"
+
+
 def _to_str_list(value: Any) -> List[str]:
     """
-    Convertit une valeur en liste de chaînes propres.
-    - list -> nettoie
-    - str  -> split si multi-lignes / puces, sinon [str]
-    - autre -> []
+    Converts a value to a clean list of strings.
+    - list  → cleans each item
+    - str   → splits on newlines/bullets if needed, else wraps in list
+    - other → returns []
     """
     if value is None:
         return []
 
     if isinstance(value, list):
-        out = []
-        for v in value:
-            s = str(v).strip()
-            if s:
-                out.append(s)
-        return out
+        return [str(v).strip() for v in value if str(v).strip()]
 
     if isinstance(value, str):
         s = value.strip()
         if not s:
             return []
-        # Si le LLM a renvoyé une liste sous forme de texte (puces ou lignes)
         if "\n" in s or s.lstrip().startswith(("-", "•")):
-            lines = []
-            for line in s.splitlines():
-                line = line.strip()
-                line = line.lstrip("-• ").strip()
-                if line:
-                    lines.append(line)
-            return lines
+            return [
+                line.strip().lstrip("-• ").strip()
+                for line in s.splitlines()
+                if line.strip().lstrip("-• ").strip()
+            ]
         return [s]
 
     return []
 
-def parse_llm_structured_response(raw: str) -> Dict[str, Any]:
-    """
-    Parsing robuste :
-    - retire ```json
-    - extrait le premier objet JSON {...}
-    - tente json.loads (avec support JSON doublement encodé)
-    - fallback heuristique si JSON invalide
-    - normalise les champs en listes
-    """
-    default = {
-        "diagnostic": raw.strip() if raw else "",
-        "treatment_actions": [],
-        "preventive_actions": [],
-        "warnings": [],
-    }
-
-    if not raw or not raw.strip():
-        return default
-
-    text = raw.strip()
-
-    # Retire fences éventuelles
-    if "```" in text:
-        parts = text.split("```")
-        if len(parts) >= 3:
-            text = parts[1].strip()
-        text = text.replace("json\n", "").replace("json\r\n", "").strip()
-
-    # Extraction JSON
-    candidate = _extract_first_json_object(text)
-    if not candidate:
-        # JSON tronqué : on tente au moins d'extraire des champs avec la méthode heuristique
-        data = _heuristic_parse_from_text(text)
-        if any([data.get("diagnostic"), data.get("treatment_actions"), data.get("preventive_actions"), data.get("warnings")]):
-            return {
-                "diagnostic": (data.get("diagnostic") or "").strip(),
-                "treatment_actions": _to_str_list(data.get("treatment_actions")),
-                "preventive_actions": _to_str_list(data.get("preventive_actions")),
-                "warnings": _to_str_list(data.get("warnings")),
-            }
-        return default
-
-    # Nettoyages légers
-    candidate = (
-        candidate.replace("```json", "")
-        .replace("```", "")
-        .replace("“", '"')
-        .replace("”", '"')
-        .replace("’", "'")
-        .strip()
-    )
-    candidate = re.sub(r",\s*([}\]])", r"\1", candidate)  # retire virgules finales
-
-    # Parsing principal + double encodage
-    try:
-        data = json.loads(candidate)
-        if isinstance(data, str):
-            data = json.loads(data)
-    except Exception:
-        # fallback heuristique si JSON invalide (ex: tronqué)
-        data = _heuristic_parse_from_text(text)
-
-    if not isinstance(data, dict):
-        return default
-
-    diagnostic = str(data.get("diagnostic", "")).strip() or default["diagnostic"]
-    treatment_actions = _to_str_list(data.get("treatment_actions"))
-    preventive_actions = _to_str_list(data.get("preventive_actions"))
-    warnings = _to_str_list(data.get("warnings"))
-
-    return {
-        "diagnostic": diagnostic,
-        "treatment_actions": treatment_actions,
-        "preventive_actions": preventive_actions,
-        "warnings": warnings,
-    }
-
-def infer_season_from_date(date_iso: str) -> str:
-    """
-    Déduit une saison simplifiée à partir d'une date ISO (YYYY-MM-DD).
-    C'est approximatif mais suffisant pour le contexte.
-    """
-    if not date_iso:
-        return "inconnue"
-
-    try:
-        month = datetime.fromisoformat(date_iso).month
-    except ValueError:
-        return "inconnue"
-
-    if month in (12, 1, 2):
-        return "hiver"
-    if month in (3, 4, 5):
-        return "printemps"
-    if month in (6, 7, 8):
-        return "été"
-    if month in (9, 10, 11):
-        return "automne"
-    return "inconnue"
-
-CNN_LABEL_ALIASES = {
-    "anthracnose": "Grape_Anthracnose_leaf",
-    "black_rot": "Grape_Black_rot_leaf",
-    "brown_spot": "Grape_Brown_spot_leaf",
-    "colomerus_vitis": "Grape_Erinose_leaf",
-    "downy_mildew": "Grape_Downy_mildew_leaf",
-    "elsinoe_ampelina": "Grape_Anthracnose_leaf",
-    "erinose": "Grape_Erinose_leaf",
-    "erysiphe_necator": "Grape_Powdery_mildew_leaf",
-    "esca": "Grape_Esca_leaf",
-    "guignardia_bidwellii": "Grape_Black_rot_leaf",
-    "mites": "Grape_Mites_leaf_disease",
-    "normal": "Grape_Normal_leaf",
-    "phaeomoniella_chlamydospora": "Grape_Esca_leaf",
-    "plasmopara_viticola": "Grape_Downy_mildew_leaf",
-    "powdery_mildew": "Grape_Powdery_mildew_leaf",
-    "sain": "healthy",
-    "shot_hole": "Grape_shot_hole_leaf_disease",
-}
-
-CNN_LABEL_FR = {
-    "anthracnose": "Anthracnose",
-    "brown_spot": "Tâche brune",
-    "black_rot": "Pourriture noire",
-    "downy_mildew": "Mildiou",
-    "erinose": "Érinose",
-    "esca": "Esca",
-    "mites": "Acariens",
-    "normal": "Pas de maladie",
-    "powdery_mildew": "Oïdium",
-    "shot_hole": "Coryneum",
-}
-
-DISEASE_TRANSLATION = {
-    "anthracnose": "Anthracnose",
-    "brown_spot": "Tâche brune",
-    "black_rot": "Pourriture noire de la vigne",
-    "downy_mildew": "Mildiou",
-    "erinose": "Érinose de la vigne",
-    "esca": "Esca de la vigne",
-    "mites": "Acariens",
-    "normal": "Pas de maladie",
-    "powdery_mildew": "Oïdium",
-    "shot_hole": "Coryneum",
-}
-
-def cnn_label_to_fr(raw_label: str) -> str:
-    if not raw_label:
-        return raw_label
-
-    key = raw_label.strip().lower()
-    return CNN_LABEL_FR.get(key, raw_label)
-
-def normalize_cnn_label(raw: str) -> str:
-    if not raw:
-        return raw
-    key = raw.strip()
-    # si déjà un label CNN exact, on le garde
-    if key.startswith("Grape_"):
-        return key
-    return CNN_LABEL_ALIASES.get(key.lower(), key)
 
 def _extract_first_json_object(text: str) -> Optional[str]:
     """
-    Essaie d'extraire un objet JSON {...} depuis un texte (même s'il y a du bruit autour).
-    Retourne une string JSON candidate, ou None.
+    Extracts the first JSON object {...} from a text string.
+
+    Returns:
+        JSON candidate string, or None if not found
     """
     if not text:
         return None
 
-    # Enlève les fences si présents
     cleaned = text.strip()
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
     cleaned = re.sub(r"\s*```$", "", cleaned)
 
-    # Cherche le premier '{' et le dernier '}' après celui-ci
     start = cleaned.find("{")
     if start == -1:
         return None
@@ -232,64 +115,145 @@ def _extract_first_json_object(text: str) -> Optional[str]:
     return cleaned[start:end + 1]
 
 
-def _safe_list(value: Any) -> List[str]:
-    if isinstance(value, list):
-        return [str(x) for x in value if x is not None]
-    return []
-
-
 def _heuristic_parse_from_text(text: str) -> Dict[str, Any]:
     """
-    Fallback : si le JSON est invalide, on tente d'extraire des champs avec regex.
+    Fallback parser: extracts fields from text using regex when JSON is invalid.
     """
     out: Dict[str, Any] = {
-        "diagnostic": "",
-        "treatment_actions": [],
+        "diagnostic":        "",
+        "treatment_actions":  [],
         "preventive_actions": [],
-        "warnings": [],
+        "warnings":           [],
     }
 
     if not text:
         return out
 
-    # Diagnostic
     m = re.search(r'"diagnostic"\s*:\s*"([^"]*)"', text, flags=re.DOTALL)
     if m:
         out["diagnostic"] = m.group(1).replace("\\n", "\n").strip()
 
-    # Listes
     def extract_list(key: str) -> List[str]:
         m2 = re.search(rf'"{key}"\s*:\s*\[(.*?)\]', text, flags=re.DOTALL)
         if not m2:
             return []
-        inside = m2.group(1)
-        return [s.replace("\\n", "\n").strip() for s in re.findall(r'"([^"]+)"', inside)]
+        return [
+            s.replace("\\n", "\n").strip()
+            for s in re.findall(r'"([^"]+)"', m2.group(1))
+        ]
 
-    out["treatment_actions"] = extract_list("treatment_actions")
+    out["treatment_actions"]  = extract_list("treatment_actions")
     out["preventive_actions"] = extract_list("preventive_actions")
-    out["warnings"] = extract_list("warnings")
+    out["warnings"]           = extract_list("warnings")
     return out
+
+
+def parse_llm_structured_response(raw: str) -> Dict[str, Any]:
+    """
+    Robust LLM response parser:
+    - Removes ```json fences
+    - Extracts first JSON object {...}
+    - Attempts json.loads (with double-encoding support)
+    - Falls back to heuristic regex parsing if JSON is invalid
+    - Normalizes all fields to string lists
+
+    Args:
+        raw: Raw LLM output string
+
+    Returns:
+        Dict with keys: diagnostic, treatment_actions, preventive_actions, warnings
+    """
+    default = {
+        "diagnostic":        raw.strip() if raw else "",
+        "treatment_actions":  [],
+        "preventive_actions": [],
+        "warnings":           [],
+    }
+
+    if not raw or not raw.strip():
+        return default
+
+    text = raw.strip()
+
+    # Remove code fences
+    if "```" in text:
+        parts = text.split("```")
+        if len(parts) >= 3:
+            text = parts[1].strip()
+        text = text.replace("json\n", "").replace("json\r\n", "").strip()
+
+    # Extract JSON candidate
+    candidate = _extract_first_json_object(text)
+    if not candidate:
+        data = _heuristic_parse_from_text(text)
+        if any([data.get("diagnostic"), data.get("treatment_actions"),
+                data.get("preventive_actions"), data.get("warnings")]):
+            return {
+                "diagnostic":        (data.get("diagnostic") or "").strip(),
+                "treatment_actions":  _to_str_list(data.get("treatment_actions")),
+                "preventive_actions": _to_str_list(data.get("preventive_actions")),
+                "warnings":           _to_str_list(data.get("warnings")),
+            }
+        return default
+
+    # Light cleanup
+    candidate = (
+        candidate
+        .replace("```json", "")
+        .replace("```", "")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2019", "'")
+        .strip()
+    )
+    candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
+
+    # Parse JSON (with double-encoding fallback)
+    try:
+        data = json.loads(candidate)
+        if isinstance(data, str):
+            data = json.loads(data)
+    except Exception:
+        data = _heuristic_parse_from_text(text)
+
+    if not isinstance(data, dict):
+        return default
+
+    return {
+        "diagnostic":        str(data.get("diagnostic", "")).strip() or default["diagnostic"],
+        "treatment_actions":  _to_str_list(data.get("treatment_actions")),
+        "preventive_actions": _to_str_list(data.get("preventive_actions")),
+        "warnings":           _to_str_list(data.get("warnings")),
+    }
+
+
+# ── Main pipeline ──────────────────────────────────────────────────────────────
 
 def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Pipeline principal :
-    1) Déduit la saison à partir de la date.
-    2) Va chercher les chunks de connaissance pertinents dans Weaviate.
-    3) Construit un prompt RAG et appelle un LLM.
-    4) Calcule les dosages via compute_dosage.
-    5) Retourne une réponse structurée pour l'API.
+    Main RAG pipeline:
+    1. Infer season from date
+    2. Retrieve relevant knowledge chunks from Weaviate
+    3. Build RAG prompt and call LLM
+    4. Compute dosage via dosage_rules
+    5. Return structured response for the API
+
+    Args:
+        payload: Dict with keys: cnn_label, mode, severity, area_m2, date_iso
+
+    Returns:
+        Structured treatment plan dict
     """
     cnn_label = payload["cnn_label"]
-    mode = str(payload["mode"]).strip().lower()
-    severity = str(payload["severity"]).strip().lower()
-    area_m2 = float(payload["area_m2"])
-    date_iso = payload.get("date_iso", "")
+    mode      = str(payload["mode"]).strip().lower()
+    severity  = str(payload["severity"]).strip().lower()
+    area_m2   = float(payload["area_m2"])
+    date_iso  = payload.get("date_iso", "")
 
-    season = infer_season_from_date(date_iso)
+    season       = infer_season_from_date(date_iso)
+    disease_name = DISEASE_NAMES.get(cnn_label, cnn_label)
 
-    cnn_label_normalized = normalize_cnn_label(payload["cnn_label"])
-
-    # 2. Récupération des chunks dans Weaviate
+    # ── Step 1: Retrieve chunks from Weaviate ──────────────────────────────────
     with weaviate_client() as client:
         chunks = search_treatment_chunks(
             client=client,
@@ -298,44 +262,37 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
             severity=severity,
             top_k=8,
         )
+        # Fallback: retry without mode filter
         if not chunks:
             chunks = search_treatment_chunks(
                 client=client,
-                disease_input=cnn_label_normalized,
-                mode=None,
-                severity=severity,
-                top_k=8,
-            )
-        if not chunks:
-            disease_id_guess = f"grape_{cnn_label.strip().lower()}"
-            chunks = search_treatment_chunks(
-                client=client,
-                disease_input=disease_id_guess,
+                disease_input=cnn_label,
                 mode=None,
                 severity=severity,
                 top_k=8,
             )
 
-    # 3. Si aucun chunk, on renvoie un plan basé uniquement sur les règles de dosage.
-    dosage = compute_dosage(cnn_label_normalized, mode, area_m2, severity=severity)
+    if DEBUG:
+        print(f"\n[RAG] {len(chunks)} chunks retrieved for '{cnn_label}'")
+
+    # ── Step 2: Compute dosage ─────────────────────────────────────────────────
+    dosage = compute_dosage(cnn_label, mode, area_m2, severity=severity)
     if not dosage:
-        dosage = {
-            "note": "Aucune règle de dosage disponible pour ce cas (label/mode/sévérité)."
-        }
+        dosage = {"note": "No dosage rule available for this disease/mode/severity combination."}
 
+    # ── Step 3: Fallback chunks if Weaviate returned nothing ───────────────────
     if not chunks:
         chunks = [{
             "text": (
-                "Aucun extrait pertinent n'a été trouvé dans la base de connaissances. "
-                "Base uniquement sur les règles de dosage et les bonnes pratiques générales."
+                "No relevant extract found in the knowledge base. "
+                "Base recommendations on dosage rules and general best practices only."
             )
         }]
 
-    # 4. Construction du prompt à partir des chunks RAG.
-    disease_name_fr = DISEASE_TRANSLATION.get(cnn_label)
+    # ── Step 4: Build prompt and call LLM ─────────────────────────────────────
     prompt = build_treatment_prompt(
         cnn_label=cnn_label,
-        disease_name_fr=disease_name_fr,
+        disease_name=disease_name,
         mode=mode,
         severity=severity,
         area_m2=area_m2,
@@ -344,83 +301,67 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     if DEBUG:
-        print("\n===== PROMPT ENVOYÉ AU LLM =====\n")
+        print("\n===== PROMPT SENT TO LLM =====\n")
         print(prompt)
 
-    # 5. Appel au LLM Hugging Face via le wrapper + parsing structuré.
+    # ── Step 5: Parse LLM response ─────────────────────────────────────────────
     try:
-        raw_llm_text = call_llm(
-            prompt,
-            max_new_tokens=700,
-            temperature=0.2,
-            top_p=0.9
-        )
+        raw_llm_text = call_llm(prompt, max_new_tokens=700, temperature=0.2, top_p=0.9)
 
         if DEBUG:
-            print("\n===== RAW LLM TEXT =====\n")
+            print("\n===== RAW LLM OUTPUT =====\n")
             print(raw_llm_text)
 
         parsed = parse_llm_structured_response(raw_llm_text)
 
-        # Fallback de sécurité si le parsing a échoué partiellement
         if not parsed.get("diagnostic"):
-            fallback_text = (
-                "Diagnostic rapide : la situation nécessite un avis technique.\n"
-                "Je n'ai pas pu générer une recommandation détaillée automatiquement.\n"
-                "Veuillez consulter un conseiller viticole local.\n"
+            parsed["diagnostic"] = (
+                "The situation requires technical assessment. "
+                "No detailed recommendation could be generated automatically. "
+                "Please consult a local viticulture advisor."
             )
-            parsed["diagnostic"] = fallback_text
 
     except LLMError as e:
         if DEBUG:
-            print("\n===== ERREUR LLM =====\n")
-            print(f"Erreur LLM : {e}")
+            print(f"\n===== LLM ERROR =====\n{e}")
 
-        # Fallback de sécurité : si le LLM plante, on revient à un message simple
         fallback_text = (
-            "Diagnostic rapide : la situation nécessite un avis technique.\n"
-            "Je n'ai pas pu générer une recommandation détaillée automatiquement.\n"
-            "Veuillez consulter un conseiller viticole local.\n"
-            f"(Détail technique : {e})\n"
+            "The situation requires technical assessment. "
+            "No detailed recommendation could be generated automatically. "
+            "Please consult a local viticulture advisor. "
+            f"(Technical detail: {e})"
         )
         parsed = {
-            "diagnostic": fallback_text,
-            "treatment_actions": [],
+            "diagnostic":        fallback_text,
+            "treatment_actions":  [],
             "preventive_actions": [],
-            "warnings": [],
+            "warnings":           [],
         }
         raw_llm_text = fallback_text
 
-    # Warnings de base + warnings issus du LLM
+    # ── Step 6: Build final result ─────────────────────────────────────────────
     base_warnings = [
-        "Ces recommandations sont indicatives.",
-        "Vérifiez la réglementation locale et les notices des produits avant application.",
+        "These recommendations are indicative only.",
+        "Always verify local regulations and product labels before application.",
     ]
 
-    treatment_actions = parsed.get("treatment_actions") or []
-    preventive_actions = parsed.get("preventive_actions") or []
-    llm_warnings = parsed.get("warnings") or []
-    warnings = base_warnings + llm_warnings
-    diagnostic_text = parsed.get("diagnostic") or ""
-
     result = {
-        "cnn_label": cnn_label,
-        "cnn_label_fr": cnn_label_to_fr(payload["cnn_label"]),
-        "mode": mode,
-        "area_m2": area_m2,
-        "severity": severity,
-        "season": season,
-        "treatment_plan": dosage,
-        "diagnostic": diagnostic_text,
-        "treatment_actions": treatment_actions,
-        "preventive_actions": preventive_actions,
-        "warnings": warnings,
-        "raw_llm_output": raw_llm_text
+        "cnn_label":          cnn_label,
+        "disease_name":       disease_name,
+        "mode":               mode,
+        "area_m2":            area_m2,
+        "severity":           severity,
+        "season":             season,
+        "treatment_plan":     dosage,
+        "diagnostic":         parsed.get("diagnostic") or "",
+        "treatment_actions":  parsed.get("treatment_actions") or [],
+        "preventive_actions": parsed.get("preventive_actions") or [],
+        "warnings":           base_warnings + (parsed.get("warnings") or []),
+        "raw_llm_output":     raw_llm_text,
     }
 
     if DEBUG:
-        result["raw_llm_output"] = raw_llm_text    
-        print("\n===== RÉPONSE FINALE RETOURNÉE PAR generate_treatment_advice =====\n")
+        print("\n===== FINAL RESPONSE =====\n")
         print(result)
 
     return result

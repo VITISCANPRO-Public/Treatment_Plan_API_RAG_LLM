@@ -1,363 +1,260 @@
+"""
+dosage_rules.py — Dosage rules and treatment products by disease and farming mode.
+"""
+
 from typing import Dict, Any, Optional
 import re
 
-# Règles de dosage par maladie et par mode (conventionnel / bio).
+
+# ── Dosage rules by disease and farming mode ───────────────────────────────────
 DOSAGE_RULES: Dict[str, Dict[str, Dict[str, Optional[float]]]] = {
-    "Grape_Downy_mildew_leaf": {
-        "conventionnel": {"dose_l_ha": 1.6, "volume_bouillie_l_ha": 250.0},
-        "bio": {"dose_l_ha": 2.8, "volume_bouillie_l_ha": 300.0},
+    "plasmopara_viticola": {
+        "conventional": {"dose_l_ha": 1.6, "volume_bouillie_l_ha": 250.0},
+        "organic":      {"dose_l_ha": 2.8, "volume_bouillie_l_ha": 300.0},
     },
-    "Grape_Powdery_mildew_leaf": {
-        "conventionnel": {"dose_l_ha": 0.8, "volume_bouillie_l_ha": 220.0},
-        "bio": {"dose_l_ha": 6.0, "volume_bouillie_l_ha": 250.0},
+    "erysiphe_necator": {
+        "conventional": {"dose_l_ha": 0.8, "volume_bouillie_l_ha": 220.0},
+        "organic":      {"dose_l_ha": 6.0, "volume_bouillie_l_ha": 250.0},
     },
-    "Grape_Mites_leaf_disease": {
-        "conventionnel": {"dose_l_ha": 0.6, "volume_bouillie_l_ha": 180.0},
-        "bio": {"dose_l_ha": 7.0, "volume_bouillie_l_ha": 200.0},
+    "colomerus_vitis": {
+        "conventional": {"dose_l_ha": 0.9, "volume_bouillie_l_ha": 180.0},
+        "organic":      {"dose_l_ha": 1.2, "volume_bouillie_l_ha": 200.0},
     },
-    "Grape_Anthracnose_leaf": {
-        "conventionnel": {"dose_l_ha": 2.0, "volume_bouillie_l_ha": 250.0},
-        "bio": {"dose_l_ha": 3.0, "volume_bouillie_l_ha": 300.0},
+    "elsinoe_ampelina": {
+        "conventional": {"dose_l_ha": 2.0, "volume_bouillie_l_ha": 250.0},
+        "organic":      {"dose_l_ha": 3.0, "volume_bouillie_l_ha": 300.0},
     },
-    "Grape_Brown_spot_leaf": {
-        "conventionnel": {"dose_l_ha": 1.2, "volume_bouillie_l_ha": 200.0},
-        "bio": {"dose_l_ha": 1.0, "volume_bouillie_l_ha": 200.0},
+    "guignardia_bidwellii": {
+        "conventional": {"dose_l_ha": 1.5, "volume_bouillie_l_ha": 250.0},
+        "organic":      {"dose_l_ha": 2.5, "volume_bouillie_l_ha": 300.0},
     },
-    "Grape_shot_hole_leaf_disease": {
-        "conventionnel": {"dose_l_ha": 1.0, "volume_bouillie_l_ha": 180.0},
-        "bio": {"dose_l_ha": 2.2, "volume_bouillie_l_ha": 220.0},
+    "phaeomoniella_chlamydospora": {
+        "conventional": {"dose_l_ha": None, "volume_bouillie_l_ha": 200.0},
+        "organic":      {"dose_l_ha": None, "volume_bouillie_l_ha": 200.0},
     },
-    "Grape_Normal_leaf": {
-        "conventionnel": {"dose_l_ha": 0.0, "volume_bouillie_l_ha": 0.0},
-        "bio": {"dose_l_ha": 0.0, "volume_bouillie_l_ha": 0.0},
-    },
-    "Grape_Black_rot_leaf": {
-        "conventionnel": {"dose_l_ha": 1.5, "volume_bouillie_l_ha": 250.0},
-        "bio": {"dose_l_ha": 2.5, "volume_bouillie_l_ha": 300.0},
-    },
-    "Grape_Erinose_leaf": {
-        "conventionnel": {"dose_l_ha": 0.9, "volume_bouillie_l_ha": 180.0},
-        "bio": {"dose_l_ha": 1.2, "volume_bouillie_l_ha": 200.0},
-    },
-    "Grape_Esca_leaf": {
-        "conventionnel": {"dose_l_ha": None, "volume_bouillie_l_ha": 200.0},
-        "bio": {"dose_l_ha": None, "volume_bouillie_l_ha": 200.0},
+    "healthy": {
+        "conventional": {"dose_l_ha": 0.0, "volume_bouillie_l_ha": 0.0},
+        "organic":      {"dose_l_ha": 0.0, "volume_bouillie_l_ha": 0.0},
     },
 }
 
-# Alias acceptés pour les noms de maladies (UNIQUEMENT les noms)
-CNN_LABEL_ALIASES: Dict[str, str] = {
-    "anthracnose": "Grape_Anthracnose_leaf",
-    "black_rot": "Grape_Black_rot_leaf",
-    "brown_spot": "Grape_Brown_spot_leaf",
-    "colomerus_vitis": "Grape_Erinose_leaf",
-    "downy_mildew": "Grape_Downy_mildew_leaf",
-    "elsinoe_ampelina": "Grape_Anthracnose_leaf",
-    "erinose": "Grape_Erinose_leaf",
-    "erysiphe_necator": "Grape_Powdery_mildew_leaf",
-    "esca": "Grape_Esca_leaf",
-    "guignardia_bidwellii": "Grape_Black_rot_leaf",
-    "mites": "Grape_Mites_leaf_disease",
-    "normal": "Grape_Normal_leaf",
-    "phaeomoniella_chlamydospora": "Grape_Esca_leaf",
-    "plasmopara_viticola": "Grape_Downy_mildew_leaf",
-    "powdery_mildew": "Grape_Powdery_mildew_leaf",
-    "sain": "healthy",
-    "shot_hole": "Grape_shot_hole_leaf_disease",
-}
 
+# ── Treatment products by disease and farming mode ─────────────────────────────
 TREATMENT_PRODUCTS: Dict[str, Dict[str, Dict[str, Any]]] = {
-    "Grape_Downy_mildew_leaf": {
-        "conventionnel": {
-            "type": "anti-mildiou (fongicides)",
+    "plasmopara_viticola": {
+        "conventional": {
+            "type": "Anti-downy mildew (fungicides)",
             "examples": [
-                "famille CAA (ex: diméthomorphe)",
-                "famille QoI (ex: azoxystrobine)",
-                "produits de contact (ex: folpel)"
+                "CAA family (e.g. dimethomorph)",
+                "QoI family (e.g. azoxystrobin)",
+                "Contact products (e.g. folpet)"
             ],
-            "dose_unit": "kg/ha ou L/ha (selon formulation)",
-            "strategy": "préventif + renfort après pluie",
-            "note": "Alterner les familles (modes d’action) pour limiter les résistances. Renforcer la cadence si pluies répétées."
+            "dose_unit": "kg/ha or L/ha (depending on formulation)",
+            "strategy": "Preventive + reinforce after rainfall",
+            "note": "Alternate fungicide families to limit resistance. Increase frequency during repeated rainfall."
         },
-        "bio": {
-            "type": "cuivre / biocontrôle",
+        "organic": {
+            "type": "Copper / biocontrol",
             "examples": [
-                "cuivre (hydroxyde de cuivre / bouillie bordelaise)",
-                "phosphonates selon réglementation locale",
-                "stimulateurs de défenses naturelles (SDN)"
-            ],
-            "dose_unit": "kg/ha",
-            "strategy": "préventif",
-            "note": "Le cuivre est surtout préventif : viser les périodes à risque (mouillures). Respecter les plafonds réglementaires annuels."
-        },
-    },
-
-    "Grape_Powdery_mildew_leaf": {
-        "conventionnel": {
-            "type": "anti-oïdium (fongicides)",
-            "examples": [
-                "triazoles (ex: myclobutanil / tébuconazole)",
-                "strobilurines (QoI)",
-                "soufre (en complément si compatible)"
-            ],
-            "dose_unit": "kg/ha ou L/ha",
-            "strategy": "préventif strict",
-            "note": "L’oïdium ne se rattrape pas : priorité à la régularité. Rotation des modes d’action indispensable."
-        },
-        "bio": {
-            "type": "soufre / biocontrôle",
-            "examples": [
-                "soufre mouillable",
-                "bicarbonate de potassium",
-                "huiles végétales (selon conditions)"
+                "Copper (copper hydroxide / Bordeaux mixture)",
+                "Phosphonates (subject to local regulations)",
+                "Natural defense stimulators (NDS)"
             ],
             "dose_unit": "kg/ha",
-            "strategy": "préventif",
-            "note": "Soufre efficace mais risque de brûlures si fortes chaleurs. Adapter l’intervalle selon météo et pression."
+            "strategy": "Preventive",
+            "note": "Copper is mainly preventive: target risk periods (leaf wetness). Respect annual regulatory limits."
         },
     },
-
-    "Grape_Mites_leaf_disease": {
-        "conventionnel": {
-            "type": "acaricide",
+    "erysiphe_necator": {
+        "conventional": {
+            "type": "Anti-powdery mildew (fungicides)",
             "examples": [
-                "abamectine (selon homologation)",
-                "spirodiclofène (selon homologation)",
-                "hexythiazox (selon homologation)"
+                "Triazoles (e.g. myclobutanil / tebuconazole)",
+                "Strobilurins (QoI)",
+                "Sulfur (as complement if compatible)"
+            ],
+            "dose_unit": "kg/ha or L/ha",
+            "strategy": "Strict preventive",
+            "note": "Powdery mildew cannot be reversed: regularity is critical. Mandatory rotation of modes of action."
+        },
+        "organic": {
+            "type": "Sulfur / biocontrol",
+            "examples": [
+                "Wettable sulfur",
+                "Potassium bicarbonate",
+                "Vegetable oils (depending on conditions)"
+            ],
+            "dose_unit": "kg/ha",
+            "strategy": "Preventive",
+            "note": "Sulfur is effective but risk of phytotoxicity above 30°C. Adjust interval based on weather and disease pressure."
+        },
+    },
+    "colomerus_vitis": {
+        "conventional": {
+            "type": "Acaricide",
+            "examples": [
+                "Abamectin (subject to authorization)",
+                "Spirodiclofen (subject to authorization)",
+                "Hexythiazox (subject to authorization)"
             ],
             "dose_unit": "L/ha",
-            "strategy": "ciblé",
-            "note": "Intervenir tôt si foyer détecté. Éviter les traitements systématiques pour préserver les auxiliaires."
+            "strategy": "Targeted",
+            "note": "Intervene early if outbreak detected. Avoid systematic treatments to preserve beneficial fauna."
         },
-        "bio": {
-            "type": "huiles / savon / soufre",
+        "organic": {
+            "type": "Oils / soap / sulfur",
             "examples": [
-                "huile paraffinique (huiles blanches)",
-                "savon noir (effet mécanique)",
-                "soufre (effet partiel)"
+                "Paraffinic oil (white oils)",
+                "Black soap (mechanical effect)",
+                "Sulfur (partial effect)"
             ],
             "dose_unit": "L/ha",
-            "strategy": "réduction de pression",
-            "note": "Approche surtout mécanique : viser le bon stade et bien mouiller. Répéter si nécessaire."
+            "strategy": "Pressure reduction",
+            "note": "Mainly mechanical approach: target the right stage and ensure good coverage. Repeat if necessary."
         },
     },
-
-    "Grape_Anthracnose_leaf": {
-        "conventionnel": {
-            "type": "fongicide de contact",
+    "elsinoe_ampelina": {
+        "conventional": {
+            "type": "Contact fungicide",
             "examples": [
-                "mancozèbe (si autorisé localement)",
-                "folpel",
-                "cuivre (selon stratégie)"
+                "Mancozeb (if locally authorized)",
+                "Folpet",
+                "Copper (depending on strategy)"
             ],
             "dose_unit": "kg/ha",
-            "strategy": "préventif",
-            "note": "Intervenir tôt sur tissus jeunes (périodes humides). Sécuriser après épisodes pluvieux et croissance rapide."
+            "strategy": "Preventive",
+            "note": "Intervene early on young tissues during humid periods. Reinforce after heavy rain or rapid growth."
         },
-        "bio": {
-            "type": "cuivre / biocontrôle",
+        "organic": {
+            "type": "Copper / biocontrol",
             "examples": [
-                "cuivre (hydroxyde / bouillie bordelaise)",
-                "biocontrôle (extraits végétaux selon homologation)"
+                "Copper (hydroxide / Bordeaux mixture)",
+                "Biocontrol (plant extracts subject to authorization)"
             ],
             "dose_unit": "kg/ha",
-            "strategy": "préventif",
-            "note": "Efficacité très dépendante de la régularité et de la météo (pluie = lessivage). Renforcer l’aération."
-        },
-    },
-
-    "Grape_Brown_spot_leaf": {
-        "conventionnel": {
-            "type": "produit de contact (secondaire)",
-            "examples": [
-                "folpel",
-                "dithiocarbamates (selon réglementation)"
-            ],
-            "dose_unit": "kg/ha",
-            "strategy": "opportuniste",
-            "note": "Maladie souvent secondaire : traiter surtout si l’année est très humide et si défoliation progresse."
-        },
-        "bio": {
-            "type": "biocontrôle / conduite culturale",
-            "examples": [
-                "bicarbonate de potassium (selon homologation)",
-                "SDN (stimulateurs de défenses naturelles)"
-            ],
-            "dose_unit": "kg/ha",
-            "strategy": "préventif",
-            "note": "Priorité à l’aération et à la réduction du stress. Traitements légers si progression rapide."
+            "strategy": "Preventive",
+            "note": "Efficacy depends on application regularity and weather (rain = washout). Improve ventilation."
         },
     },
-
-    "Grape_shot_hole_leaf_disease": {
-        "conventionnel": {
-            "type": "contact (faible priorité)",
+    "guignardia_bidwellii": {
+        "conventional": {
+            "type": "Anti-black rot (fungicides)",
             "examples": [
-                "folpel",
-                "cuivre (selon programme)"
+                "Dithiocarbamates (subject to regulations)",
+                "Strobilurins (QoI)",
+                "Contact fungicides (e.g. captan / folpet depending on availability)"
             ],
-            "dose_unit": "kg/ha",
-            "strategy": "préventif léger",
-            "note": "Souvent mineur : éviter les traitements inutiles. Protéger surtout jeunes vignes si année très humide."
+            "dose_unit": "kg/ha or L/ha",
+            "strategy": "Preventive + reinforce after rainfall",
+            "note": "Target risk periods (rain + heat). Ensure good bunch coverage and renew after washout."
         },
-        "bio": {
-            "type": "cuivre (préventif)",
+        "organic": {
+            "type": "Copper / biocontrol",
             "examples": [
-                "cuivre (bouillie bordelaise / hydroxyde)"
+                "Copper (Bordeaux mixture / hydroxide)",
+                "Natural defense stimulators (NDS)"
             ],
             "dose_unit": "kg/ha",
-            "strategy": "préventif",
-            "note": "Efficace surtout avant apparition des perforations. Aération et hygiène foliaire recommandées."
+            "strategy": "Preventive",
+            "note": "Mainly preventive protection. Reinforce prophylaxis (ventilation, removal of infected debris)."
         },
     },
-
-    "Grape_Normal_leaf": {
-        "conventionnel": {
-            "type": "aucun",
+    "phaeomoniella_chlamydospora": {
+        "conventional": {
+            "type": "No direct curative treatment",
+            "examples": [
+                "Sanitary pruning / trunk surgery (depending on practice)",
+                "Replacement of severely affected vines"
+            ],
+            "dose_unit": "",
+            "strategy": "Prophylaxis + vineyard management",
+            "note": "Esca is a wood disease: the approach is mainly agronomic (hygiene, wound protection, vine management)."
+        },
+        "organic": {
+            "type": "No direct curative treatment",
+            "examples": [
+                "Prophylaxis (pruning hygiene)",
+                "Water stress management and canopy ventilation"
+            ],
+            "dose_unit": "",
+            "strategy": "Prophylaxis",
+            "note": "Same logic: wood disease. Monitoring + cultural measures; no standard product treatment available."
+        },
+    },
+    "healthy": {
+        "conventional": {
+            "type": "None",
             "examples": [],
             "dose_unit": "",
-            "strategy": "aucune",
-            "note": "Aucun traitement nécessaire. Maintenir la surveillance."
+            "strategy": "None",
+            "note": "No treatment required. Maintain regular monitoring."
         },
-        "bio": {
-            "type": "aucun",
+        "organic": {
+            "type": "None",
             "examples": [],
             "dose_unit": "",
-            "strategy": "aucune",
-            "note": "Aucun traitement nécessaire. Maintenir la surveillance."
-        },
-    },
-
-"Grape_Black_rot_leaf": {
-        "conventionnel": {
-            "type": "anti-black rot (fongicides)",
-            "examples": [
-                "dithiocarbamates (selon réglementation)",
-                "strobilurines (QoI)",
-                "fongicides de contact (ex: captan / folpel selon dispo)"
-            ],
-            "dose_unit": "kg/ha ou L/ha",
-            "strategy": "préventif + renfort après pluie",
-            "note": "Cibler les périodes à risque (pluie/chaleur). Bien couvrir les grappes et renouveler après lessivage."
-        },
-        "bio": {
-            "type": "cuivre / biocontrôle",
-            "examples": [
-                "cuivre (bouillie bordelaise / hydroxyde)",
-                "SDN (stimulateurs de défenses naturelles)"
-            ],
-            "dose_unit": "kg/ha",
-            "strategy": "préventif",
-            "note": "Protection surtout préventive. Renforcer la prophylaxie (aération, gestion des débris infectés)."
-        },
-    },
-
-    "Grape_Erinose_leaf": {
-        "conventionnel": {
-            "type": "acaricide / anti-acariens",
-            "examples": [
-                "abamectine (selon homologation)",
-                "hexythiazox (selon homologation)",
-                "spirodiclofène (selon homologation)"
-            ],
-            "dose_unit": "L/ha",
-            "strategy": "ciblé",
-            "note": "Traiter tôt si forte pression. Éviter les traitements systématiques pour préserver les auxiliaires."
-        },
-        "bio": {
-            "type": "huiles / savon / soufre",
-            "examples": [
-                "huile paraffinique (huiles blanches)",
-                "savon noir (effet mécanique)",
-                "soufre (effet partiel)"
-            ],
-            "dose_unit": "L/ha",
-            "strategy": "réduction de pression",
-            "note": "Efficacité surtout mécanique : viser le bon stade, excellente couverture, répétition possible."
-        },
-    },
-
-    "Grape_Esca_leaf": {
-        "conventionnel": {
-            "type": "pas de traitement curatif direct",
-            "examples": [
-                "taille sanitaire / chirurgie du tronc (selon pratique)",
-                "remplacement des ceps atteints (si nécessaire)"
-            ],
-            "dose_unit": "",
-            "strategy": "prophylaxie + gestion du vignoble",
-            "note": "Esca = maladie du bois : l’approche est surtout agronomique (hygiène, réduction des blessures, gestion des ceps)."
-        },
-        "bio": {
-            "type": "pas de traitement curatif direct",
-            "examples": [
-                "prophylaxie (hygiène de taille)",
-                "gestion du stress hydrique et aération"
-            ],
-            "dose_unit": "",
-            "strategy": "prophylaxie",
-            "note": "Même logique : maladie du bois. Surveillance + mesures culturales ; traitement “produit” non standard."
+            "strategy": "None",
+            "note": "No treatment required. Maintain regular monitoring."
         },
     },
 }
 
+
+# ── Severity multipliers ───────────────────────────────────────────────────────
 SEVERITY_MULTIPLIER = {
-    "faible": 0.75,
-    "moderee": 1.0,
-    "modérée": 1.0,
-    "forte": 1.4,
+    "low":      0.75,
+    "moderate": 1.0,
+    "high":     1.4,
 }
 
+
+# ── CNN label aliases ──────────────────────────────────────────────────────────
+CNN_LABEL_ALIASES: Dict[str, str] = {
+    "colomerus_vitis":             "colomerus_vitis",
+    "elsinoe_ampelina":            "elsinoe_ampelina",
+    "erysiphe_necator":            "erysiphe_necator",
+    "guignardia_bidwellii":        "guignardia_bidwellii",
+    "healthy":                     "healthy",
+    "phaeomoniella_chlamydospora": "phaeomoniella_chlamydospora",
+    "plasmopara_viticola":         "plasmopara_viticola",
+}
+
+
+# ── Helper functions ───────────────────────────────────────────────────────────
 
 def _normalize_cnn_label(raw_label: str) -> str:
     """
-    Normalise uniquement le nom de la maladie vers une clé de DOSAGE_RULES.
-    Accepte :
-    - alias courts ("anthracnose")
-    - labels complets ("Grape_Anthracnose_leaf")
-    - noms de fichiers ("Grape_Anthracnose_leaf.md")
+    Normalizes a CNN label to a valid DOSAGE_RULES key.
+    Accepts INRAE scientific names and common aliases.
     """
     if not raw_label:
         return raw_label
 
     label = str(raw_label).strip()
-
-    # Retire une éventuelle extension .md
     label = re.sub(r"\.md$", "", label, flags=re.IGNORECASE)
-
-    # Si déjà un label canonique
-    if label.startswith("Grape_"):
-        return label
-
-    # Alias court
     return CNN_LABEL_ALIASES.get(label.lower(), label)
+
 
 def format_treatment_product(product: Dict[str, Any]) -> list[str]:
     """
-    Transforme un treatment_product dict en liste de bullet points lisibles.
+    Converts a treatment product dictionary into a readable list of bullet points.
     """
     if not product:
         return []
 
     bullets = []
-
     if product.get("type"):
-        bullets.append(f"Type de produit : {product['type']}")
-
+        bullets.append(f"Product type: {product['type']}")
     if product.get("examples"):
-        examples = ", ".join(product["examples"])
-        bullets.append(f"Exemples : {examples}")
-
+        bullets.append(f"Examples: {', '.join(product['examples'])}")
     if product.get("dose_unit"):
-        bullets.append(f"Unité indicative : {product['dose_unit']}")
-
+        bullets.append(f"Indicative unit: {product['dose_unit']}")
     if product.get("strategy"):
-        bullets.append(f"Stratégie : {product['strategy']}")
-
+        bullets.append(f"Strategy: {product['strategy']}")
     if product.get("note"):
-        bullets.append(f"Note : {product['note']}")
-
+        bullets.append(f"Note: {product['note']}")
     return bullets
+
 
 def compute_dosage(
     cnn_label: str,
@@ -367,45 +264,43 @@ def compute_dosage(
     safety_margin: float = 0.10,
 ) -> Dict[str, Any]:
     """
-    Calcule les volumes à préparer à partir :
-    - d'un label de maladie (cnn_label),
-    - d'un mode (bio ou conventionnel),
-    - d'une surface en m²,
-    - d'une marge de sécurité (10 % par défaut).
-    """
+    Computes treatment volumes based on:
+    - disease label (cnn_label)
+    - farming mode (conventional or organic)
+    - area in m²
+    - severity level (low, moderate, high)
+    - safety margin (10% by default)
 
+    Returns a dictionary with dosage details and treatment product information.
+    """
     cnn_label_norm = _normalize_cnn_label(cnn_label)
 
-    if cnn_label_norm not in DOSAGE_RULES or mode not in DOSAGE_RULES[cnn_label_norm]:
+    if cnn_label_norm not in DOSAGE_RULES or mode not in DOSAGE_RULES.get(cnn_label_norm, {}):
         return {}
 
     rules = DOSAGE_RULES[cnn_label_norm][mode]
-
     dose_l_ha = rules.get("dose_l_ha")
     mult = SEVERITY_MULTIPLIER.get((severity or "").strip().lower(), 1.0)
     dose_l_ha_eff = (dose_l_ha or 0.0) * mult
-
     volume_bouillie_l_ha = float(rules.get("volume_bouillie_l_ha") or 0.0)
-
     fraction_ha = area_m2 / 10_000.0
 
-    if (dose_l_ha == 0.0 and volume_bouillie_l_ha == 0.0) or volume_bouillie_l_ha == 0.0:
+    # Healthy leaf — no treatment needed
+    if dose_l_ha == 0.0 and volume_bouillie_l_ha == 0.0:
         return {
             "area_m2": area_m2,
-            "dose_l_ha": round(dose_l_ha_eff, 2),
-            "volume_bouillie_l_ha": volume_bouillie_l_ha,
+            "dose_l_ha": 0.0,
+            "volume_bouillie_l_ha": 0.0,
             "estimated_product_l_for_area": 0.0,
             "estimated_volume_l_for_area": 0.0,
             "configured": True,
-            "note": "Aucun traitement nécessaire pour ce niveau de sévérité.",
+            "note": "No treatment required for this disease/severity level.",
         }
 
+    # Disease with no dose configured (e.g. Esca)
     if dose_l_ha is None:
-        bouillie_l = volume_bouillie_l_ha * fraction_ha
-        bouillie_l *= 1.0 + safety_margin
-
+        bouillie_l = volume_bouillie_l_ha * fraction_ha * (1.0 + safety_margin)
         treatment_product = TREATMENT_PRODUCTS.get(cnn_label_norm, {}).get(mode)
-
         return {
             "area_m2": area_m2,
             "dose_l_ha": None,
@@ -414,15 +309,12 @@ def compute_dosage(
             "estimated_volume_l_for_area": round(bouillie_l, 2),
             "treatment_product": format_treatment_product(treatment_product),
             "configured": False,
-            "note": "Dose non configurée pour ce label/mode. Renseigner dose_l_ha dans DOSAGE_RULES.",
+            "note": "No dose configured for this label/mode. See treatment product recommendations.",
         }
 
-    produit_l = dose_l_ha_eff * fraction_ha
-    bouillie_l = volume_bouillie_l_ha * fraction_ha
-
-    produit_l *= 1.0 + safety_margin
-    bouillie_l *= 1.0 + safety_margin
-
+    # Standard case
+    produit_l = dose_l_ha_eff * fraction_ha * (1.0 + safety_margin)
+    bouillie_l = volume_bouillie_l_ha * fraction_ha * (1.0 + safety_margin)
     treatment_product = TREATMENT_PRODUCTS.get(cnn_label_norm, {}).get(mode)
 
     return {

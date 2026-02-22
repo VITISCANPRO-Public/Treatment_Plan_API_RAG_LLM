@@ -1,8 +1,13 @@
-from typing import List, Dict, Any
+"""
+prompts.py — LLM prompt construction for treatment plan generation.
+"""
+
+from typing import List, Dict
+
 
 def build_treatment_prompt(
     cnn_label: str,
-    disease_name_fr: str,
+    disease_name: str,
     mode: str,
     severity: str,
     area_m2: float,
@@ -10,74 +15,85 @@ def build_treatment_prompt(
     context_chunks: List[Dict[str, str]],
 ) -> str:
     """
-    Construit le prompt envoyé au LLM pour générer un plan d'action viticole.
+    Builds the prompt sent to the LLM to generate a viticultural action plan.
 
-    On attend une réponse STRICTEMENT au format JSON valide, avec 4 champs :
+    Expected response: a strictly valid JSON object with 4 fields:
     - diagnostic: str
     - treatment_actions: List[str]
     - preventive_actions: List[str]
     - warnings: List[str]
-    """
 
-    contexte = "\n\n---\n\n".join([c["text"] for c in context_chunks])
+    Args:
+        cnn_label: INRAE scientific name predicted by the CNN
+        disease_name: Human-readable disease name in English
+        mode: Farming mode ('conventional' or 'organic')
+        severity: Severity level ('low', 'moderate', 'high')
+        area_m2: Affected area in m²
+        season: Inferred season from date
+        context_chunks: Relevant knowledge base chunks retrieved from Weaviate
+
+    Returns:
+        Formatted prompt string ready to be sent to the LLM
+    """
+    context = "\n\n---\n\n".join([c["text"] for c in context_chunks])
 
     prompt = f"""
-Tu es un expert viticole spécialisé dans la protection de la vigne.
+You are an expert viticulture specialist in grapevine disease management.
 
-Contexte de la situation :
-- Maladie détectée (label CNN) : "{cnn_label}"
-- Maladie (nom détaillé) : "{disease_name_fr}"
-- Mode de conduite : "{mode}"
-- Gravité : "{severity}"
-- Surface concernée : {area_m2} m²
-- Saison : "{season}"
+Situation context:
+- Detected disease (CNN label): "{cnn_label}"
+- Disease name: "{disease_name}"
+- Farming mode: "{mode}"
+- Severity: "{severity}"
+- Affected area: {area_m2} m²
+- Season: "{season}"
 
-Base de connaissances (extraits de fiches techniques) :
-{contexte}
+Knowledge base (extracts from technical disease sheets):
+{context}
 
-Ta tâche est de :
-1) Proposer un DIAGNOSTIC synthétique.
-2) Proposer des ACTIONS DE TRAITEMENT concrètes et applicables.
-3) Proposer des MESURES PRÉVENTIVES pour la suite de la saison.
-4) Rappeler les AVERTISSEMENTS de sécurité ou de réglementation.
+Your task:
+1) Provide a concise DIAGNOSTIC of the situation.
+2) Propose concrete and actionable TREATMENT ACTIONS.
+3) Propose PREVENTIVE MEASURES for the rest of the season.
+4) List relevant WARNINGS about safety, regulations or pre-harvest intervals.
 
-CONTRAINTE TRÈS IMPORTANTE :
-Tu dois répondre avec un UNIQUE objet JSON, valide, SANS texte avant ou après, SANS explication.
-Utilise exactement les clés suivantes :
+CRITICAL CONSTRAINT:
+You must respond with a SINGLE valid JSON object, with NO text before or after, NO explanation.
+Use exactly the following keys:
 
 {{
-  "diagnostic": "texte court (3 à 5 phrases max) expliquant la situation.",
+  "diagnostic": "Short text (3 to 5 sentences max) explaining the situation.",
   "treatment_actions": [
-    "Action de traitement 1 (précise, opérationnelle).",
-    "Action de traitement 2."
+    "Treatment action 1 (specific, operational).",
+    "Treatment action 2."
   ],
   "preventive_actions": [
-    "Action préventive 1.",
-    "Action préventive 2."
+    "Preventive action 1.",
+    "Preventive action 2."
   ],
   "warnings": [
-    "Avertissement 1 (sécurité, réglementation, délais avant récolte, etc.).",
-    "Avertissement 2."
+    "Warning 1 (safety, regulations, pre-harvest intervals, etc.).",
+    "Warning 2."
   ]
 }}
 
-Règles :
-- Écris en français.
-- Reste concret, clair et opérationnel pour un viticulteur.
-- Ne parle pas de toi, ne t'excuse pas, ne remercie pas.
-- Ne mets PAS de ```json ou de balise de code autour du JSON.
-- Ne mets PAS de virgule finale après le dernier élément d'une liste.
-- Ne mets AUCUN texte en dehors du JSON.
+Rules:
+- Write in English.
+- Be concrete, clear and operational for a wine grower.
+- Do not talk about yourself, do not apologize, do not thank.
+- Do NOT wrap the JSON in ```json or any code block.
+- Do NOT add a trailing comma after the last element of a list.
+- Do NOT include ANY text outside the JSON object.
 
-FORMAT (OBLIGATOIRE) :
-- "treatment_actions", "preventive_actions" et "warnings" doivent être des tableaux JSON (List[str]) uniquement.
-- Interdiction de représenter une liste sous forme d'objet avec des clés "0:", "1:", etc.
-- Interdiction d'utiliser des listes Markdown (ex: "- ...", "* ...", "1) ...").
-- Chaque élément de liste doit être une chaîne de caractères simple, sans préfixe de numérotation.
-- Chaque élément doit faire 1 à 2 phrases max, et éviter les formats "Action: ..." (pas de paires clé/valeur).
-- Vise 2 à 6 éléments par liste.
-- Avant de répondre, vérifie que ton JSON passe un json.loads.
+Format rules (MANDATORY):
+- "treatment_actions", "preventive_actions" and "warnings" must be JSON arrays (List[str]) only.
+- Never represent a list as an object with keys "0:", "1:", etc.
+- Never use Markdown lists (e.g. "- ...", "* ...", "1) ...").
+- Each list item must be a plain string with no numbering prefix.
+- Each item should be 1 to 2 sentences max, avoid "Action: ..." key/value format.
+- Aim for 2 to 6 items per list.
+- Before responding, verify that your JSON would pass json.loads().
 
-Répond maintenant en fournissant uniquement l'objet JSON.
+Respond now with the JSON object only.
 """
     return prompt.strip()
