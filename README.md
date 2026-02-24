@@ -1,10 +1,11 @@
 ---
-title: Vitiscan Treatment Plan API
-emoji: 🍇
-colorFrom: green
-colorTo: purple
+title: VITISCANPRO SOLUTION API
+emoji: 📊
+colorFrom: gray
+colorTo: indigo
 sdk: docker
 pinned: false
+license: apache-2.0
 ---
 
 # Vitiscan — Treatment Plan API
