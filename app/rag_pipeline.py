@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 from app.dosage_rules import compute_dosage
 from app.llm_client import LLMError, call_llm
 from app.prompts import build_treatment_prompt
-from app.weaviate_client import search_treatment_chunks, weaviate_client
+from app.weaviate_client import search_treatment_chunks, weaviate_client, weaviate_available
 
 DEBUG = False
 
@@ -32,6 +32,177 @@ DISEASE_NAMES: Dict[str, str] = {
     "phaeomoniella_chlamydospora": "Esca",
     "plasmopara_viticola":         "Downy Mildew",
 }
+
+# ── Static fallback ──────────────────────────────────────────────────────────
+
+# Static fallback responses used when Weaviate is unavailable (HuggingFace
+# without WEAVIATE_URL configured). Based on the knowledge base .md files.
+# Temporary — will be replaced by full RAG once Weaviate Cloud is configured.
+
+FALLBACK_RESPONSES: Dict[str, Dict[str, Any]] = {
+    "plasmopara_viticola": {
+        "diagnostic": "Downy mildew detected. Caused by Plasmopara viticola, a fungal pathogen that thrives in humid conditions.",
+        "treatment_actions": [
+            "Apply copper-based fungicide (e.g. Bordeaux mixture) immediately.",
+            "Use mancozeb or cymoxanil as curative treatment.",
+            "Remove and destroy severely infected leaves.",
+        ],
+        "preventive_actions": [
+            "Apply preventive fungicide treatments before rain periods.",
+            "Ensure good air circulation through canopy management.",
+            "Avoid leaf wetness by adjusting irrigation timing.",
+        ],
+        "warnings": [
+            "Copper applications are limited in organic farming — check local regulations.",
+            "Respect pre-harvest intervals for all applied products.",
+        ],
+    },
+    "erysiphe_necator": {
+        "diagnostic": "Powdery mildew detected. Caused by Erysiphe necator, appears as white powdery patches on leaves and shoots.",
+        "treatment_actions": [
+            "Apply sulfur-based fungicide or potassium bicarbonate.",
+            "Remove and destroy heavily infected shoots.",
+            "Use systemic fungicides (tebuconazole, myclobutanil) for severe cases.",
+        ],
+        "preventive_actions": [
+            "Apply preventive sulfur treatments from bud break onwards.",
+            "Avoid excessive nitrogen fertilization which promotes susceptible growth.",
+            "Maintain open canopy to reduce humidity.",
+        ],
+        "warnings": [
+            "Do not apply sulfur when temperatures exceed 35°C — risk of phytotoxicity.",
+            "Respect pre-harvest intervals for all applied products.",
+        ],
+    },
+    "guignardia_bidwellii": {
+        "diagnostic": "Black rot detected. Caused by Guignardia bidwellii, producing dark circular lesions on leaves and shriveled berries.",
+        "treatment_actions": [
+            "Apply mancozeb or myclobutanil at bud break.",
+            "Continue protective sprays every 10–14 days during wet periods.",
+            "Remove all mummified berries and infected leaves.",
+        ],
+        "preventive_actions": [
+            "Remove and destroy mummified berries during winter pruning.",
+            "Apply protective fungicide before forecasted rain events.",
+            "Maintain good air circulation in the canopy.",
+        ],
+        "warnings": [
+            "Black rot spreads rapidly in wet conditions — do not delay treatment.",
+            "Respect pre-harvest intervals for all applied products.",
+        ],
+    },
+    "elsinoe_ampelina": {
+        "diagnostic": "Anthracnose detected. Caused by Elsinoe ampelina, producing circular lesions with grey centers on leaves and shoots.",
+        "treatment_actions": [
+            "Apply copper-based treatment or ziram early in the season.",
+            "Use systemic fungicides during active disease development.",
+            "Prune and destroy all visibly infected shoots.",
+        ],
+        "preventive_actions": [
+            "Prune infected wood thoroughly during dormancy.",
+            "Apply dormant copper spray before bud break.",
+            "Avoid working in vineyard when foliage is wet.",
+        ],
+        "warnings": [
+            "Anthracnose infections can girdle young shoots — monitor closely after rain.",
+            "Respect pre-harvest intervals for all applied products.",
+        ],
+    },
+    "colomerus_vitis": {
+        "diagnostic": "Erineum mite infestation detected (Colomerus vitis). Causes abnormal felt-like growth on the underside of leaves.",
+        "treatment_actions": [
+            "Apply wettable sulfur at bud burst.",
+            "Use acaricide treatments if infestation is severe.",
+            "Remove and destroy heavily infested leaves.",
+        ],
+        "preventive_actions": [
+            "Apply sulfur spray preventively at bud break each season.",
+            "Avoid moving plant material from infested vineyards.",
+            "Monitor young leaves regularly from early spring.",
+        ],
+        "warnings": [
+            "Erineum mite damage is mainly aesthetic — rarely threatens yield severely.",
+            "Respect pre-harvest intervals for all applied products.",
+        ],
+    },
+    "phaeomoniella_chlamydospora": {
+        "diagnostic": "Esca disease detected. Caused by Phaeomoniella chlamydospora, a wood pathogen with no curative treatment available.",
+        "treatment_actions": [
+            "Remove and destroy all infected wood immediately.",
+            "Apply wound sealant (e.g. Greenpruning) to all pruning cuts.",
+            "In severe cases, consider trunk renewal if vine is young enough.",
+        ],
+        "preventive_actions": [
+            "Prune during dry weather to minimize infection risk.",
+            "Avoid large pruning wounds — use double pruning technique.",
+            "Apply wound sealant systematically after every pruning session.",
+        ],
+        "warnings": [
+            "There is no curative treatment for Esca — prevention is critical.",
+            "Infected vines may show sudden collapse (apoplexy) — remove immediately.",
+        ],
+    },
+    "healthy": {
+        "diagnostic": "No disease detected. The leaf appears healthy.",
+        "treatment_actions": [],
+        "preventive_actions": [
+            "Continue standard vineyard monitoring throughout the season.",
+            "Apply preventive fungicide treatments during high-risk weather periods.",
+            "Maintain balanced fertilization to avoid excessive vegetative growth.",
+        ],
+        "warnings": [
+            "Regular monitoring remains essential even for healthy vines.",
+        ],
+    },
+}
+
+def _build_fallback_response(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Builds a structured fallback response when Weaviate is unavailable.
+    Uses static disease-specific content based on the knowledge base .md files.
+
+    This is a temporary measure until Weaviate Cloud is configured.
+    """
+    cnn_label    = payload["cnn_label"]
+    mode         = str(payload["mode"]).strip().lower()
+    severity     = str(payload["severity"]).strip().lower()
+    area_m2      = float(payload["area_m2"])
+    date_iso     = payload.get("date_iso", "")
+    season       = infer_season_from_date(date_iso)
+    disease_name = DISEASE_NAMES.get(cnn_label, cnn_label)
+
+    fallback = FALLBACK_RESPONSES.get(cnn_label, {
+        "diagnostic":        "Disease detected. Please consult a local viticulture advisor.",
+        "treatment_actions":  [],
+        "preventive_actions": [],
+        "warnings":           [],
+    })
+
+    dosage = compute_dosage(cnn_label, mode, area_m2, severity=severity)
+    if not dosage:
+        dosage = {"note": "No dosage rule available for this disease/mode/severity combination."}
+
+    base_warnings = [
+        "These recommendations are indicative only.",
+        "Always verify local regulations and product labels before application.",
+        "Full RAG-based treatment plan temporarily unavailable — Weaviate Cloud not configured.",
+    ]
+
+    return {
+        "cnn_label":          cnn_label,
+        "disease_name":       disease_name,
+        "mode":               mode,
+        "area_m2":            area_m2,
+        "severity":           severity,
+        "season":             season,
+        "treatment_plan":     dosage,
+        "diagnostic":         fallback["diagnostic"],
+        "treatment_actions":  fallback["treatment_actions"],
+        "preventive_actions": fallback["preventive_actions"],
+        "warnings":           base_warnings + fallback["warnings"],
+        "raw_llm_output":     "Fallback mode — Weaviate unavailable.",
+    }
+
 
 
 # ── Helper functions ───────────────────────────────────────────────────────────
@@ -252,6 +423,14 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     season       = infer_season_from_date(date_iso)
     disease_name = DISEASE_NAMES.get(cnn_label, cnn_label)
+
+    # ── Static fallback ────────────────────────────────────────────────────────
+    # If Weaviate is not available (HuggingFace without WEAVIATE_URL configured),
+    # return a static fallback response immediately — no crash, no 500 error.
+    # This block is removed automatically once WEAVIATE_URL is set in HF secrets.
+    if not weaviate_available():
+        return _build_fallback_response(payload)
+
 
     # ── Step 1: Retrieve chunks from Weaviate ──────────────────────────────────
     with weaviate_client() as client:
