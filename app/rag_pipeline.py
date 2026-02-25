@@ -11,6 +11,7 @@ Pipeline steps:
 
 import json
 import re
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -19,7 +20,8 @@ from app.llm_client import LLMError, call_llm
 from app.prompts import build_treatment_prompt
 from app.weaviate_client import search_treatment_chunks, weaviate_client, weaviate_available
 
-DEBUG = False
+DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+
 
 # ── Disease label mapping (INRAE labels → English names) ──────────────────────
 
@@ -202,7 +204,6 @@ def _build_fallback_response(payload: Dict[str, Any]) -> Dict[str, Any]:
         "warnings":           base_warnings + fallback["warnings"],
         "raw_llm_output":     "Fallback mode — Weaviate unavailable.",
     }
-
 
 
 # ── Helper functions ───────────────────────────────────────────────────────────
