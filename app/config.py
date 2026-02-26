@@ -28,7 +28,7 @@ HF_API_URL = os.getenv(
     "HF_API_URL",
     "https://router.huggingface.co/v1/chat/completions",
 )
-HF_API_TOKEN = os.getenv("HF_API_TOKEN", "")
+HF_TOKEN = os.getenv("HF_TOKEN", "")
 HF_MODEL_ID = os.getenv(
     "HF_MODEL_ID",
     "meta-llama/Meta-Llama-3-8B-Instruct",
