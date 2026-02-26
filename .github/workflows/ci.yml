@@ -54,7 +54,9 @@ jobs:
 
       - name: Run integration tests
         # No real Weaviate or HuggingFace needed — generate_treatment_advice is mocked
-        run: pytest tests/test_api_integration.py -v --tb=short
+        run: |
+          export PYTHONPATH=.
+          pytest tests/ -v --tb=short
 
 # ═════════════════════════════════════════════════════════════════════════════
 # JOB 3 — Deploy to HuggingFace Spaces

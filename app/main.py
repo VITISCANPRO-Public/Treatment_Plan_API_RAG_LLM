@@ -6,8 +6,8 @@ Receives a disease prediction and returns a structured treatment plan via RAG pi
 
 from fastapi import FastAPI, Query
 
-from .rag_pipeline import generate_treatment_advice
-from .schemas import HealthResponse, SolutionRequest, SolutionResponse
+from app.rag_pipeline import generate_treatment_advice
+from app.schemas import HealthResponse, SolutionRequest, SolutionResponse
 
 
 # ── FastAPI application ────────────────────────────────────────────────────────
