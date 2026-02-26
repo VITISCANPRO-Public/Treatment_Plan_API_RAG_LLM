@@ -58,13 +58,13 @@ Treatment-Plan-API-RAG-LLM/
 │   └── weaviate_client.py  # Weaviate connection and vector search
 ├── data/
 │   └── knowledge/          # Technical disease sheets (.md)
-│       ├── colomerus_vitis.md
-│       ├── elsinoe_ampelina.md
-│       ├── erysiphe_necator.md
-│       ├── guignardia_bidwellii.md
-│       ├── healthy.md
-│       ├── phaeomoniella_chlamydospora.md
-│       └── plasmopara_viticola.md
+│       ├── Anthracnose_elsinoe_ampelina.md 
+│       ├── Black_rot_guignardia_bidwellii.md
+│       ├── Downy_mildew_plasmopara_viticola.md
+│       ├── Erinose_colomerus_vitis.md
+│       ├── Esca_phaeomoniella_chlamydospora.md
+│       ├── Healthy.md
+│       └── Powdery_mildew_erysiphe_necator.md
 ├── docker-compose.yml      # Local Weaviate instance
 ├── test_rag.py             # Manual RAG retrieval test
 ├── Dockerfile
@@ -80,8 +80,8 @@ pip install -r requirements.txt
 
 **2. Configure your `.env`**
 ```bash
-cp .env.example .env
-# Fill in HF_API_TOKEN, WEAVIATE_URL, WEAVIATE_API_KEY
+cp .env.template .env
+# Fill in HF_TOKEN, WEAVIATE_URL, WEAVIATE_API_KEY
 ```
 
 **3. Start Weaviate locally**
@@ -118,7 +118,7 @@ python test_rag.py
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HF_API_TOKEN` | HuggingFace API token | — |
+| `HF_TOKEN` | HuggingFace API token | — |
 | `HF_MODEL_ID` | LLM model ID | `meta-llama/Meta-Llama-3-8B-Instruct` |
 | `HF_API_URL` | HuggingFace router URL | `https://router.huggingface.co/v1/chat/completions` |
 | `WEAVIATE_URL` | Weaviate Cloud URL (empty = local) | `""` |
@@ -134,7 +134,7 @@ Deployed on HuggingFace Spaces (Docker) at:
 
 ## Requirements
 
-- Python 3.11
+- Python 3.10
 - Weaviate 1.27+
 - Docker (for local Weaviate)
 - See `requirements.txt` for full list
