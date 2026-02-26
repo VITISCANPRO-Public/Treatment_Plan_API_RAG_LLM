@@ -1,9 +1,15 @@
 """
-test_rag.py — Manual test script for the RAG retrieval pipeline.
-Run after ingestion to verify that Weaviate search works correctly.
+test_rag.py — Manual validation script for the RAG pipeline.
+
+This script is NOT an automated pytest test.
+It requires a running Weaviate instance.
+
+To be run manually in two situations:
+  1. After the initial ingestion   → check that the chunks are correctly indexed
+  2. After a Weaviate migration    → check that vector search is working
 
 Usage:
-    python test_rag.py
+    python scripts/test_rag.py
 """
 
 from app.weaviate_client import weaviate_client, search_treatment_chunks
