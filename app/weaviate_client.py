@@ -18,6 +18,7 @@ import weaviate.classes as wvc
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 from weaviate.classes.init import AdditionalConfig, Timeout
+from contextlib import contextmanager
 from app.config import WEAVIATE_URL
 
 load_dotenv()
@@ -97,12 +98,10 @@ def weaviate_client():
                 return fallback_response()
             # ... use client normally
     """
-    url     = WEAVIATE_URL.strip()
+    url     = (WEAVIATE_URL or "").strip()
     api_key = (os.getenv("WEAVIATE_API_KEY") or "").strip()
 
-    # ── HuggingFace without WEAVIATE_URL → yield None instead of crashing ─────
-    # Previously this raised RuntimeError which caused HTTP 500 on all requests.
-    # Now it yields None so the caller can fall back to static responses gracefully.
+    # ── HuggingFace without WEAVIATE_URL → yield None ─────
     if not url and is_deployed():
         logger.warning(
             "Deployed environment detected but WEAVIATE_URL is not set. "
@@ -111,35 +110,45 @@ def weaviate_client():
         yield None
         return
 
-    # ── Cloud instance (Weaviate Cloud) ────────────────────────────────────────
-    if url:
-        logger.info(f"Connecting to Weaviate Cloud: {url}")
-        auth   = weaviate.auth.AuthApiKey(api_key) if api_key else None
-        client = weaviate.connect_to_weaviate_cloud(
-            cluster_url=url,
-            auth_credentials=auth,
-            additional_config=AdditionalConfig(
-                timeout=Timeout(init=30, query=60, insert=60)
-            ),
-        )
-
-    # ── Local instance (development only) ─────────────────────────────────────
-    else:
-        logger.info("Connecting to local Weaviate instance (localhost:8080)")
-        client = weaviate.connect_to_local(
-            host="localhost",
-            port=8080,
-            grpc_port=50051,
-            additional_config=AdditionalConfig(
-                timeout=Timeout(init=30, query=60, insert=60)
-            ),
-        )
-
+    client = None
     try:
+        # ── LOCAL MODE: no URL, or URL contains localhost/127.0.0.1 ───────────
+        is_local = (
+            not url or
+            "localhost" in url or
+            "127.0.0.1" in url or
+            url.startswith("http://weaviate:")
+        )
+
+        if is_local:
+            logger.info("Connecting to local Weaviate instance (localhost:8080)")
+            client = weaviate.connect_to_local(
+                host="localhost",
+                port=8080,
+                grpc_port=50051,
+                additional_config=AdditionalConfig(
+                    timeout=Timeout(init=30, query=60, insert=60)
+                ),
+            )
+
+        # ── CLOUD MODE: Weaviate Cloud URL (*.weaviate.network) ───────────────
+        else:
+            logger.info(f"Connecting to Weaviate Cloud: {url}")
+            auth = weaviate.auth.AuthApiKey(api_key) if api_key else None
+            client = weaviate.connect_to_weaviate_cloud(
+                cluster_url=url,
+                auth_credentials=auth,
+                additional_config=AdditionalConfig(
+                    timeout=Timeout(init=30, query=60, insert=60)
+                ),
+            )
+
         yield client
+
     finally:
-        client.close()
-        logger.info("Weaviate connection closed.")
+        if client is not None:
+            client.close()
+            logger.info("Weaviate connection closed.")
 
 
 # ── RAG search ─────────────────────────────────────────────────────────────────
