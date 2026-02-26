@@ -44,11 +44,25 @@ def get_embedder() -> SentenceTransformer:
 
 def is_deployed() -> bool:
     """Returns True if running inside a deployed environment (HuggingFace, GCP, etc.)"""
-    return bool(
-        os.getenv("HF_SPACE_ID") or
-        os.getenv("SPACE_ID") or
-        os.getenv("K_SERVICE")
-    )
+    
+    # Multiple checks for HuggingFace Spaces
+    hf_indicators = [
+        os.getenv("HF_SPACE_ID"),
+        os.getenv("SPACE_ID"),
+        os.getenv("SPACE_AUTHOR_NAME"),
+        os.getenv("SPACE_REPO_NAME"),
+    ]
+    # Other cloud indicators
+    cloud_indicators = [
+        os.getenv("K_SERVICE"),      # Google Cloud Run
+        os.getenv("DYNO"),           # Heroku
+        os.getenv("RENDER"),         # Render
+    ]
+    # HuggingFace Spaces uses /code as working directory
+    is_hf_filesystem = os.path.exists("/code/app")
+    
+    return bool(any(hf_indicators) or any(cloud_indicators) or is_hf_filesystem)
+
 
 
 def weaviate_available() -> bool:
@@ -62,21 +76,22 @@ def weaviate_available() -> bool:
     Returns False if deployed but WEAVIATE_URL is not set.
     In that case, rag_pipeline will use static fallback responses instead.
     """
-    url = WEAVIATE_URL.strip()
+    url = (WEAVIATE_URL or "").strip()
 
-    if url:
-        return True       # cloud instance configured → available
-
+    # cloud instance configured → available
+    if url and "localhost" not in url and "127.0.0.1" not in url:
+        return True    
+    
+    # Deployed without cloud instance → not available
     if is_deployed():
         logger.warning(
-            "WEAVIATE_URL is not set in this deployed environment. "
-            "Weaviate is unavailable — falling back to static responses. "
-            "To enable full RAG functionality, set WEAVIATE_URL and "
-            "WEAVIATE_API_KEY in HuggingFace Space secrets."
+            "WEAVIATE_URL is not set (or points to localhost) in this deployed environment. "
+            "Weaviate is unavailable — falling back to static responses."
         )
-        return False      # deployed without cloud instance → not available
+        return False
 
-    return True           # local development → assume localhost is running
+    # local development → assume localhost is running
+    return True           
 
 
 # ── Weaviate client (context manager) ─────────────────────────────────────────
@@ -101,10 +116,12 @@ def weaviate_client():
     url     = (WEAVIATE_URL or "").strip()
     api_key = (os.getenv("WEAVIATE_API_KEY") or "").strip()
 
-    # ── HuggingFace without WEAVIATE_URL → yield None ─────
-    if not url and is_deployed():
+    # ── Check if we're deployed without proper Weaviate config ─────────────────
+    is_local_url = not url or "localhost" in url or "127.0.0.1" in url
+    
+    if is_local_url and is_deployed():
         logger.warning(
-            "Deployed environment detected but WEAVIATE_URL is not set. "
+            "Deployed environment detected but WEAVIATE_URL is not set or points to localhost. "
             "Yielding None client — RAG pipeline will use static fallback responses."
         )
         yield None
@@ -112,15 +129,8 @@ def weaviate_client():
 
     client = None
     try:
-        # ── LOCAL MODE: no URL, or URL contains localhost/127.0.0.1 ───────────
-        is_local = (
-            not url or
-            "localhost" in url or
-            "127.0.0.1" in url or
-            url.startswith("http://weaviate:")
-        )
-
-        if is_local:
+        # ── LOCAL MODE ─────────────────────────────────────────────────────────
+        if is_local_url:
             logger.info("Connecting to local Weaviate instance (localhost:8080)")
             client = weaviate.connect_to_local(
                 host="localhost",
@@ -131,7 +141,7 @@ def weaviate_client():
                 ),
             )
 
-        # ── CLOUD MODE: Weaviate Cloud URL (*.weaviate.network) ───────────────
+        # ── CLOUD MODE (Weaviate Cloud) ────────────────────────────────────────
         else:
             logger.info(f"Connecting to Weaviate Cloud: {url}")
             auth = weaviate.auth.AuthApiKey(api_key) if api_key else None
@@ -149,6 +159,7 @@ def weaviate_client():
         if client is not None:
             client.close()
             logger.info("Weaviate connection closed.")
+
 
 
 # ── RAG search ─────────────────────────────────────────────────────────────────

@@ -435,6 +435,9 @@ def generate_treatment_advice(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # ── Step 1: Retrieve chunks from Weaviate ──────────────────────────────────
     with weaviate_client() as client:
+        if client is None:
+            return _build_fallback_response(payload)
+        
         chunks = search_treatment_chunks(
             client=client,
             disease_input=cnn_label,
