@@ -81,6 +81,7 @@ Treatment-Plan-API-RAG-LLM/
 │   ├── __init__.py
 │   ├── test_api_integration.py # Integration tests (endpoints, mocked RAG pipeline)
 │   └── test_units.py           # Unit tests (pure functions, no external services)
+├── schemas.py                  # Pydantic request/response models
 ├── .env.template               # Environment variable template
 ├── .gitignore
 ├── conftest.py                 # pytest root config (fixes PYTHONPATH)
