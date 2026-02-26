@@ -18,6 +18,7 @@ import weaviate.classes as wvc
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 from weaviate.classes.init import AdditionalConfig, Timeout
+from config import WEAVIATE_URL
 
 load_dotenv()
 
@@ -60,7 +61,7 @@ def weaviate_available() -> bool:
     Returns False if deployed but WEAVIATE_URL is not set.
     In that case, rag_pipeline will use static fallback responses instead.
     """
-    url = (os.getenv("WEAVIATE_URL") or "").strip()
+    url = WEAVIATE_URL.strip()
 
     if url:
         return True       # cloud instance configured → available
@@ -96,7 +97,7 @@ def weaviate_client():
                 return fallback_response()
             # ... use client normally
     """
-    url     = (os.getenv("WEAVIATE_URL") or "").strip()
+    url     = WEAVIATE_URL.strip()
     api_key = (os.getenv("WEAVIATE_API_KEY") or "").strip()
 
     # ── HuggingFace without WEAVIATE_URL → yield None instead of crashing ─────
