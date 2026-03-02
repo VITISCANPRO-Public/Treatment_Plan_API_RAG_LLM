@@ -18,7 +18,6 @@ import weaviate.classes as wvc
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 from weaviate.classes.init import AdditionalConfig, Timeout
-from contextlib import contextmanager
 from app.config import WEAVIATE_URL
 
 load_dotenv()
