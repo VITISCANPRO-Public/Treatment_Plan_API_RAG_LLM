@@ -4,7 +4,7 @@ dosage_rules.py — Dosage rules and treatment products by disease and farming m
 
 from typing import Dict, Any, Optional
 import re
-
+from app.config import DISEASE_NAMES
 
 # ── Dosage rules by disease and farming mode ───────────────────────────────────
 DOSAGE_RULES: Dict[str, Dict[str, Dict[str, Optional[float]]]] = {
@@ -209,15 +209,7 @@ SEVERITY_MULTIPLIER = {
 
 
 # ── CNN label aliases ──────────────────────────────────────────────────────────
-CNN_LABEL_ALIASES: Dict[str, str] = {
-    "colomerus_vitis":             "colomerus_vitis",
-    "elsinoe_ampelina":            "elsinoe_ampelina",
-    "erysiphe_necator":            "erysiphe_necator",
-    "guignardia_bidwellii":        "guignardia_bidwellii",
-    "healthy":                     "healthy",
-    "phaeomoniella_chlamydospora": "phaeomoniella_chlamydospora",
-    "plasmopara_viticola":         "plasmopara_viticola",
-}
+CNN_LABEL_ALIASES: Dict[str, str] = {label: label for label in DISEASE_NAMES.keys()}
 
 
 # ── Helper functions ───────────────────────────────────────────────────────────

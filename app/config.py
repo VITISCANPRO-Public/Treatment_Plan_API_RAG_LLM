@@ -40,3 +40,18 @@ WEAVIATE_API_KEY = os.getenv("WEAVIATE_API_KEY", "")
 
 # ── Knowledge base ──
 KNOWLEDGE_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "knowledge")
+
+
+# ── Disease label mapping (INRAE CNN labels → English names) ──
+DISEASE_NAMES: dict[str, str] = {
+    "colomerus_vitis":             "Erinose",
+    "elsinoe_ampelina":            "Anthracnose",
+    "erysiphe_necator":            "Powdery Mildew",
+    "guignardia_bidwellii":        "Black Rot",
+    "healthy":                     "Healthy",
+    "phaeomoniella_chlamydospora": "Esca",
+    "plasmopara_viticola":         "Downy Mildew",
+}
+
+# ── Valid CNN labels (derived from DISEASE_NAMES) ──
+VALID_CNN_LABELS: set[str] = set(DISEASE_NAMES.keys())

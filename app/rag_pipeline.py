@@ -19,21 +19,10 @@ from app.dosage_rules import compute_dosage
 from app.llm_client import LLMError, call_llm
 from app.prompts import build_treatment_prompt
 from app.weaviate_client import search_treatment_chunks, weaviate_client, weaviate_available
+from app.config import DISEASE_NAMES
 
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
-
-# ── Disease label mapping (INRAE labels → English names) ──────────────────────
-
-DISEASE_NAMES: Dict[str, str] = {
-    "colomerus_vitis":             "Erinose",
-    "elsinoe_ampelina":            "Anthracnose",
-    "erysiphe_necator":            "Powdery Mildew",
-    "guignardia_bidwellii":        "Black Rot",
-    "healthy":                     "Healthy",
-    "phaeomoniella_chlamydospora": "Esca",
-    "plasmopara_viticola":         "Downy Mildew",
-}
 
 # ── Static fallback ──────────────────────────────────────────────────────────
 
