@@ -59,7 +59,14 @@ class HealthResponse(BaseModel):
     message: Optional[str] = Field(None, description="Human-readable status message")
     status: str = Field(..., description="API health status ('ok')")
 
-
+class DetailedHealthResponse(BaseModel):
+    """Response for GET /health with component status details."""
+    status: str = Field(..., description="Overall API health status ('ok' or 'degraded')")
+    components: Dict[str, Any] = Field(
+        ...,
+        description="Health status of individual components (weaviate, llm)",
+    )
+    
 class SolutionResponse(BaseModel):
     """Response for POST /solutions — wraps the full treatment advice payload."""
     data: Dict[str, Any] = Field(

@@ -7,8 +7,9 @@ Receives a disease prediction and returns a structured treatment plan via RAG pi
 from fastapi import FastAPI, Query
 
 from app.rag_pipeline import generate_treatment_advice
-from app.schemas import HealthResponse, SolutionRequest, SolutionResponse
-
+from app.schemas import HealthResponse, SolutionRequest, SolutionResponse, DetailedHealthResponse
+from app.weaviate_client import weaviate_available
+from app.config import HF_TOKEN
 
 # ── FastAPI application ────────────────────────────────────────────────────────
 
@@ -30,10 +31,39 @@ def root():
     return {"message": "Vitiscan Treatment Plan API is running", "status": "ok"}
 
 
-@app.get("/health", response_model=HealthResponse)
+@app.get("/health", response_model=DetailedHealthResponse)
 def health_check():
-    """Detailed health check endpoint."""
-    return {"status": "ok"}
+    """
+    Detailed health check endpoint.
+    
+    Checks:
+    - Weaviate availability (cloud or local)
+    - HuggingFace token configuration
+    
+    Returns 'ok' if all components are available,
+    'degraded' if running in fallback mode.
+    """
+    weaviate_ok = weaviate_available()
+    llm_ok = bool(HF_TOKEN and HF_TOKEN.strip())
+    
+    components = {
+        "weaviate": {
+            "status": "ok" if weaviate_ok else "fallback",
+            "message": "Connected" if weaviate_ok else "Unavailable — using static responses",
+        },
+        "llm": {
+            "status": "ok" if llm_ok else "not_configured",
+            "message": "HF_TOKEN configured" if llm_ok else "HF_TOKEN missing",
+        },
+    }
+    
+    # Overall status: ok if both are good, degraded otherwise
+    overall = "ok" if (weaviate_ok and llm_ok) else "degraded"
+    
+    return {
+        "status": overall,
+        "components": components,
+    }
 
 
 @app.post("/solutions", response_model=SolutionResponse)
