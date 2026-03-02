@@ -171,7 +171,7 @@ def search_treatment_chunks(
     top_k: int = 8,
 ) -> List[Dict[str, Any]]:
     """
-    Robust RAG retrieval:
+    Robust RAG retrieval with timeout handling:
     - Accepts disease_input as INRAE scientific name (e.g. 'plasmopara_viticola')
     - Filters by (cnn_label == ...) OR (disease_id == ...)
     - Filters by farming_mode if provided, otherwise no mode filter
@@ -225,6 +225,9 @@ def search_treatment_chunks(
                 filters=where_filter,
                 return_metadata=wvc.query.MetadataQuery(distance=True),
             )
+        except TimeoutError as e:
+            logger.error(f"Weaviate query timeout: {e}")
+            return []
         except Exception as e:
             logger.error(f"near_vector query error: {e}")
             return []
