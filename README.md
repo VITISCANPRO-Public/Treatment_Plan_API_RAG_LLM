@@ -65,7 +65,8 @@ Treatment-Plan-API-RAG-LLM/
 │   ├── main.py                 # FastAPI application and endpoints
 │   ├── prompts.py              # LLM prompt construction
 │   ├── rag_pipeline.py         # Main RAG pipeline
-│   └── weaviate_client.py      # Weaviate connection and vector search
+│   ├── weaviate_client.py      # Weaviate connection and vector search
+│   └── schemas.py              # Pydantic request/response models
 ├── data/
 │   └── knowledge/              # Technical disease sheets (.md)
 │       ├── Anthracnose_elsinoe_ampelina.md
@@ -81,7 +82,6 @@ Treatment-Plan-API-RAG-LLM/
 │   ├── __init__.py
 │   ├── test_api_integration.py # Integration tests (endpoints, mocked RAG pipeline)
 │   └── test_units.py           # Unit tests (pure functions, no external services)
-├── schemas.py                  # Pydantic request/response models
 ├── .env.template               # Environment variable template
 ├── .gitignore
 ├── conftest.py                 # pytest root config (fixes PYTHONPATH)
