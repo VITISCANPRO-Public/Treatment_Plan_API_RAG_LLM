@@ -7,9 +7,6 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 # ═════════════════════════════════════════════════════════════════════════════
 # JOB 1 — Unit tests (pure functions, no external services)
