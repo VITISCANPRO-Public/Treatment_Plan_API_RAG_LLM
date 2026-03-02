@@ -35,7 +35,7 @@ HF_MODEL_ID = os.getenv(
 )
 
 # ── Weaviate ──
-WEAVIATE_URL = os.getenv("WEAVIATE_URL", "http://localhost:8080")
+WEAVIATE_URL = os.getenv("WEAVIATE_URL", "")
 WEAVIATE_API_KEY = os.getenv("WEAVIATE_API_KEY", "")
 
 # ── Knowledge base ──
