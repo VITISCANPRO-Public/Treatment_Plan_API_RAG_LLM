@@ -54,7 +54,10 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
 
       - name: Run integration tests
         # No real Weaviate or HuggingFace needed — generate_treatment_advice is mocked
