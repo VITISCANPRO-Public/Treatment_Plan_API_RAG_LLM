@@ -13,7 +13,9 @@ COPY --chown=user requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy app files
-COPY --chown=user README.md Dockerfile *.py ./
+COPY --chown=user app/ ./app/
+COPY --chown=user data/ ./data/
+COPY --chown=user README.md Dockerfile ./
 
 EXPOSE 7860
 
