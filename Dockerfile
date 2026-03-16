@@ -8,11 +8,12 @@ ENV HOME=/home/user \
 
 WORKDIR $HOME/app
 
-COPY requirements.txt /tmp/requirements.txt
-
+# Copy requirements first (for Docker layer caching)
+COPY --chown=user requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY  --chown=user README.md Dockerfile requirements.txt *.py $HOME/app/
+# Copy app files
+COPY --chown=user README.md Dockerfile *.py ./
 
 EXPOSE 7860
 
